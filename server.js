@@ -199,6 +199,14 @@ io.on('connection', (socket) => {
     });
   });
 
+  /** 히트 판정 전달 */
+  socket.on('game:hit', ({ targetId, dmg }) => {
+    const p = players.get(socket.id);
+    if (!p?.roomId) return;
+    // 방 전체에 relay (피해자가 이 이벤트를 받아 자신의 HP를 깎음)
+    io.to(p.roomId).emit('game:hit', { targetId, dmg });
+  });
+
   /** 총알 발사 */
   socket.on('game:shoot', ({ dx, dy, isUlt }) => {
     const p = players.get(socket.id);
@@ -406,6 +414,7 @@ function leaveRoom(socket) {
 
     if (room.players.length === 0) {
       // 빈 방 삭제
+      roomCodes.delete(room.code); // 방이 완전히 사라질 때만 코드 삭제
       rooms.delete(room.id);
     } else {
       // 남은 플레이어에게 상대 퇴장 알림
@@ -415,7 +424,6 @@ function leaveRoom(socket) {
         msg: `${p.name} has left the room.`,
       });
     }
-    roomCodes.delete(room.code); // 방 코드 매핑도 삭제
   }
 
   socket.leave(p.roomId);

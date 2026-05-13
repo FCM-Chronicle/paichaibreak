@@ -647,9 +647,10 @@ socket.on('game:hit', ({ targetId, dmg }) => {
 
 socket.on('game:sync', ({ id, x, y, hp, ultGauge }) => {
   if (gameState && gameState.p2.id === id) {
-    // 직접 대입 대신 보간(Lerp) 처리하여 툭툭 끊기는 현상 방지
-    gameState.p2.targetX = x;
-    gameState.p2.targetY = y;
+    // 서버에서 받은 비율(0~1) 좌표를 내 화면 크기에 맞게 변환
+    const W = canvas.width, H = canvas.height;
+    gameState.p2.targetX = x * W;
+    gameState.p2.targetY = y * H;
     gameState.p2.hp = hp; gameState.p2.ultGauge = ultGauge;
   }
 });
@@ -682,7 +683,7 @@ function doLogin() {
   if(!val) { notify('ENTER A CALLSIGN'); return; }
   myName = val.toUpperCase().slice(0,16);
   document.getElementById('myName').textContent = myName;
-  socket.emit('login', { id:myId, name:myName, color:myColor, shape:myShape });
+  socket.emit('login', { name:myName, color:myColor, shape:myShape });
 }
 
 function logout() {
@@ -815,11 +816,16 @@ window.addEventListener('resize', () => {
 });
 resizeCanvas();
 
-function positionPlayers() {
+function positionPlayers(role) {
   const W = canvas.width, H = canvas.height;
-  gameState.p1.x = W * 0.25;
+  if (role === 'left') {
+    gameState.p1.x = W * 0.25; gameState.p1.facing = 1;
+    gameState.p2.x = W * 0.75; gameState.p2.facing = -1;
+  } else {
+    gameState.p1.x = W * 0.75; gameState.p1.facing = -1;
+    gameState.p2.x = W * 0.25; gameState.p2.facing = 1;
+  }
   gameState.p1.y = H * 0.5;
-  gameState.p2.x = W * 0.75;
   gameState.p2.y = H * 0.5;
 }
 
@@ -855,8 +861,12 @@ function startGame(role, selfData, opponentData) {
     mode: 'pvp',
   };
 
-  positionPlayers();
+  positionPlayers(role);
   updateHUD();
+  
+  // 상대방의 보간 목표 위치를 시작 위치로 초기화 (순간이동 방지)
+  gameState.p2.targetX = gameState.p2.x;
+  gameState.p2.targetY = gameState.p2.y;
 
   // Reset result overlay
   document.getElementById('resultOverlay').classList.remove('show');
@@ -869,8 +879,15 @@ function startGame(role, selfData, opponentData) {
   // Start sync emission
   if(syncTimer) clearInterval(syncTimer);
   syncTimer = setInterval(() => {
-    if(gameState && gameState.running) {
-      socket.emit('game:sync', { x:p1.x, y:p1.y, hp:p1.hp, ultGauge:p1.ultGauge });
+    if(gameState && gameState.p1 && gameState.running) {
+      const W = canvas.width, H = canvas.height;
+      // 좌표를 절대값이 아닌 화면 비율로 전송하여 기기 간 차이 해결
+      socket.emit('game:sync', { 
+        x: gameState.p1.x / W, 
+        y: gameState.p1.y / H, 
+        hp: gameState.p1.hp, 
+        ultGauge: gameState.p1.ultGauge 
+      });
     }
   }, 100);
 }
