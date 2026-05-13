@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>NEON CLASH — PVP Arena</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+  :root {
+    --neon-cyan: #00f5ff;
+    --neon-pink: #ff006e;
+    --neon-yellow: #ffe600;
+    --dark-bg: #050810;
+    --panel-bg: rgba(5,8,16,0.92);
+    --border-glow: rgba(0,245,255,0.3);
+    --grid-line: rgba(0,245,255,0.06);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  body {
+    background: var(--dark-bg);
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--neon-cyan);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ── SCANLINE OVERLAY ── */
+  body::before {
+    content:'';
+    position:fixed; inset:0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events:none; z-index:9999;
+  }
+
+  /* ── SCREENS ── */
+  .screen { display:none; width:100vw; height:100vh; position:absolute; inset:0; }
+  .screen.active { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+
+  /* ── LOGIN ── */
+  #loginScreen {
+    background: radial-gradient(ellipse at 50% 40%, rgba(0,245,255,0.07) 0%, var(--dark-bg) 70%);
+  }
+  .login-title {
+    font-family:'Orbitron',sans-serif;
+    font-size: clamp(2rem,6vw,4.5rem);
+    font-weight:900;
+    letter-spacing:0.15em;
+    color:#fff;
+    text-shadow: 0 0 20px var(--neon-cyan), 0 0 60px rgba(0,245,255,0.4);
+    margin-bottom:0.2em;
+  }
+  .login-sub {
+    font-size:0.85rem;
+    letter-spacing:0.3em;
+    color: rgba(0,245,255,0.5);
+    margin-bottom:3rem;
+    text-transform:uppercase;
+  }
+  .login-box {
+    background: rgba(0,245,255,0.03);
+    border: 1px solid rgba(0,245,255,0.2);
+    border-radius:4px;
+    padding:2.5rem 3rem;
+    display:flex; flex-direction:column; gap:1.2rem;
+    min-width:320px;
+    box-shadow: 0 0 40px rgba(0,245,255,0.05), inset 0 0 40px rgba(0,0,0,0.3);
+  }
+  .login-label { font-size:0.7rem; letter-spacing:0.2em; color:rgba(0,245,255,0.6); }
+  .login-input {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(0,245,255,0.3);
+    color: var(--neon-cyan);
+    font-family:'Share Tech Mono',monospace;
+    font-size:1.1rem;
+    padding:0.7rem 1rem;
+    outline:none;
+    border-radius:2px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .login-input:focus {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 12px rgba(0,245,255,0.25);
+  }
+  .btn-primary {
+    background: transparent;
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    font-family:'Orbitron',sans-serif;
+    font-size:0.85rem;
+    font-weight:700;
+    letter-spacing:0.2em;
+    padding:0.8rem 1.5rem;
+    cursor:pointer;
+    border-radius:2px;
+    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+    text-transform:uppercase;
+  }
+  .btn-primary:hover, .btn-primary:active {
+    background: rgba(0,245,255,0.12);
+    box-shadow: 0 0 20px rgba(0,245,255,0.3);
+    color:#fff;
+  }
+  .corner-deco {
+    position:absolute;
+    width:60px; height:60px;
+    border-color: rgba(0,245,255,0.25);
+    border-style:solid;
+  }
+  .corner-deco.tl { top:20px;left:20px; border-width:2px 0 0 2px; }
+  .corner-deco.tr { top:20px;right:20px; border-width:2px 2px 0 0; }
+  .corner-deco.bl { bottom:20px;left:20px; border-width:0 0 2px 2px; }
+  .corner-deco.br { bottom:20px;right:20px; border-width:0 2px 2px 0; }
+
+  /* ── LOBBY ── */
+  #lobbyScreen { background: var(--dark-bg); }
+  .lobby-layout {
+    display:grid;
+    grid-template-columns:1fr 1.4fr 1fr;
+    gap:1.5rem;
+    width:min(1100px,96vw);
+    max-height:90vh;
+  }
+  .lobby-panel {
+    background: rgba(0,245,255,0.02);
+    border:1px solid rgba(0,245,255,0.15);
+    border-radius:4px;
+    padding:1.5rem;
+    display:flex; flex-direction:column; gap:1rem;
+  }
+  .panel-title {
+    font-family:'Orbitron',sans-serif;
+    font-size:0.75rem;
+    letter-spacing:0.25em;
+    color:rgba(0,245,255,0.6);
+    border-bottom:1px solid rgba(0,245,255,0.1);
+    padding-bottom:0.6rem;
+    text-transform:uppercase;
+  }
+  .player-list { display:flex; flex-direction:column; gap:0.5rem; overflow-y:auto; max-height:300px; }
+  .player-item {
+    display:flex; align-items:center; gap:0.7rem;
+    font-size:0.85rem; padding:0.4rem 0.6rem;
+    border-radius:2px;
+    background: rgba(0,245,255,0.03);
+    border:1px solid rgba(0,245,255,0.07);
+    transition: background 0.15s;
+  }
+  .player-item:hover { background: rgba(0,245,255,0.07); }
+  .player-color-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .player-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .player-status { font-size:0.65rem; color:rgba(0,245,255,0.4); }
+  .color-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:0.5rem; }
+  .color-swatch {
+    aspect-ratio:1; border-radius:3px; cursor:pointer;
+    border:2px solid transparent;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .color-swatch:hover { transform:scale(1.1); }
+  .color-swatch.selected { border-color:#fff; box-shadow:0 0 10px currentColor; }
+  .shape-row { display:flex; gap:1rem; }
+  .shape-btn {
+    flex:1; aspect-ratio:1; max-height:70px;
+    background:rgba(0,245,255,0.03);
+    border:1px solid rgba(0,245,255,0.2);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; border-radius:3px;
+    transition: border-color 0.15s, background 0.15s;
+    font-size:0.65rem; letter-spacing:0.1em;
+    flex-direction:column; gap:0.3rem; color:rgba(0,245,255,0.6);
+  }
+  .shape-btn:hover, .shape-btn.selected { border-color:var(--neon-cyan); background:rgba(0,245,255,0.07); color:var(--neon-cyan); }
+  .shape-preview { width:30px; height:30px; }
+  .room-list { display:flex; flex-direction:column; gap:0.5rem; max-height:220px; overflow-y:auto; }
+  .room-item {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0.5rem 0.7rem; border:1px solid rgba(0,245,255,0.1);
+    border-radius:2px; background:rgba(0,245,255,0.02);
+  }
+  .room-info { display:flex; flex-direction:column; gap:0.2rem; }
+  .room-name { font-size:0.85rem; }
+  .room-count { font-size:0.65rem; color:rgba(0,245,255,0.4); }
+  .btn-sm {
+    background:transparent; border:1px solid var(--neon-cyan);
+    color:var(--neon-cyan); font-family:'Orbitron',sans-serif;
+    font-size:0.6rem; letter-spacing:0.1em; padding:0.35rem 0.7rem;
+    cursor:pointer; border-radius:2px; text-transform:uppercase;
+    transition:background 0.15s;
+  }
+  .btn-sm:hover { background:rgba(0,245,255,0.1); }
+  .btn-danger { border-color:var(--neon-pink); color:var(--neon-pink); }
+  .btn-danger:hover { background:rgba(255,0,110,0.1); }
+  .lobby-actions { display:flex; gap:0.8rem; flex-direction:column; }
+  .status-bar {
+    font-size:0.65rem; color:rgba(0,245,255,0.35); letter-spacing:0.15em;
+    text-align:center; margin-top:auto; padding-top:0.5rem;
+  }
+
+  /* ── GAME SCREEN ── */
+  #gameScreen { position:relative; }
+  #gameCanvas {
+    display:block;
+    background: var(--dark-bg);
+  }
+
+  /* ── HUD ── */
+  .hud-top {
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:stretch;
+    background: rgba(5,8,16,0.85);
+    border-bottom:1px solid rgba(0,245,255,0.12);
+    z-index:10; height:56px;
+    backdrop-filter: blur(4px);
+  }
+  .hud-player {
+    flex:1; display:flex; align-items:center; gap:0.8rem;
+    padding:0 1rem;
+  }
+  .hud-player.right { flex-direction:row-reverse; }
+  .hud-name {
+    font-family:'Orbitron',sans-serif;
+    font-size:0.75rem; font-weight:700; letter-spacing:0.1em;
+    white-space:nowrap;
+  }
+  .hp-bar-wrap {
+    flex:1; height:8px; background:rgba(255,255,255,0.08);
+    border-radius:4px; overflow:hidden; position:relative;
+    border:1px solid rgba(255,255,255,0.06);
+  }
+  .hp-bar-fill {
+    height:100%; border-radius:4px;
+    transition: width 0.15s;
+  }
+  .hud-center {
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:0 1.5rem; gap:0.1rem; min-width:120px;
+  }
+  .hud-timer {
+    font-family:'Orbitron',sans-serif;
+    font-size:1.1rem; font-weight:900; letter-spacing:0.1em; color:#fff;
+  }
+  .hud-round { font-size:0.6rem; letter-spacing:0.2em; color:rgba(255,255,255,0.3); }
+
+  /* ── TOUCH CONTROLS ── */
+  .touch-controls {
+    position:absolute; bottom:0; left:0; right:0;
+    display:flex; justify-content:space-between; align-items:flex-end;
+    padding:0 16px 16px;
+    z-index:20; pointer-events:none;
+    opacity:0.82;
+  }
+  .dpad {
+    display:grid;
+    grid-template-columns:48px 48px 48px;
+    grid-template-rows:48px 48px 48px;
+    gap:4px;
+    pointer-events:all;
+  }
+  .dpad-btn {
+    background: rgba(0,245,255,0.06);
+    border:1px solid rgba(0,245,255,0.25);
+    border-radius:6px;
+    display:flex; align-items:center; justify-content:center;
+    color:rgba(0,245,255,0.7);
+    font-size:1.1rem;
+    cursor:pointer;
+    user-select:none;
+    -webkit-user-select:none;
+    transition: background 0.1s;
+    touch-action:none;
+  }
+  .dpad-btn:active, .dpad-btn.pressed {
+    background: rgba(0,245,255,0.2);
+    border-color:var(--neon-cyan);
+    color:#fff;
+  }
+  .dpad-center { background:transparent; border:none; }
+  .action-btns {
+    display:flex; flex-direction:column; align-items:flex-end;
+    gap:8px; pointer-events:all;
+  }
+  .action-row { display:flex; gap:8px; align-items:center; }
+  .action-btn {
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Orbitron',sans-serif; font-weight:700; letter-spacing:0.05em;
+    cursor:pointer; user-select:none; -webkit-user-select:none;
+    border:2px solid;
+    transition: transform 0.08s, box-shadow 0.08s;
+    touch-action:none;
+    flex-shrink:0;
+  }
+  .action-btn:active, .action-btn.pressed {
+    transform:scale(0.9);
+  }
+  .btn-attack {
+    width:72px; height:72px; font-size:0.55rem;
+    background:rgba(255,0,110,0.12); border-color:var(--neon-pink);
+    color:var(--neon-pink);
+    box-shadow: 0 0 15px rgba(255,0,110,0.2);
+  }
+  .btn-attack:active, .btn-attack.pressed {
+    background:rgba(255,0,110,0.3); box-shadow:0 0 25px rgba(255,0,110,0.5);
+  }
+  .btn-dash {
+    width:52px; height:52px; font-size:0.5rem;
+    background:rgba(0,245,255,0.06); border-color:var(--neon-cyan);
+    color:var(--neon-cyan);
+  }
+  .btn-dash:active, .btn-dash.pressed {
+    background:rgba(0,245,255,0.2); box-shadow:0 0 20px rgba(0,245,255,0.4);
+  }
+  .btn-dash.cooldown { opacity:0.35; pointer-events:none; }
+  .btn-ult {
+    width:60px; height:60px; font-size:0.5rem;
+    background:rgba(255,230,0,0.06); border-color:var(--neon-yellow);
+    color:var(--neon-yellow); display:none;
+    box-shadow:0 0 20px rgba(255,230,0,0.3);
+  }
+  .btn-ult.ready { display:flex; animation: ultPulse 1s infinite alternate; }
+  @keyframes ultPulse {
+    from { box-shadow:0 0 15px rgba(255,230,0,0.3); }
+    to   { box-shadow:0 0 35px rgba(255,230,0,0.7); }
+  }
+  .ult-gauge-wrap {
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    pointer-events:none;
+  }
+  .ult-gauge-label { font-size:0.55rem; letter-spacing:0.15em; color:rgba(255,230,0,0.6); }
+  .ult-gauge-bar {
+    width:60px; height:6px; background:rgba(255,255,255,0.06);
+    border-radius:3px; overflow:hidden; border:1px solid rgba(255,230,0,0.2);
+  }
+  .ult-gauge-fill {
+    height:100%; background: linear-gradient(90deg, var(--neon-yellow), #ff8c00);
+    border-radius:3px; width:0%; transition:width 0.2s;
+  }
+
+  /* ── RESULT OVERLAY ── */
+  #resultOverlay {
+    display:none; position:absolute; inset:0;
+    background:rgba(5,8,16,0.88); z-index:100;
+    flex-direction:column; align-items:center; justify-content:center; gap:1.5rem;
+    backdrop-filter:blur(6px);
+  }
+  #resultOverlay.show { display:flex; }
+  .result-title {
+    font-family:'Orbitron',sans-serif; font-size:clamp(2rem,8vw,5rem);
+    font-weight:900; letter-spacing:0.2em;
+    text-shadow:0 0 30px currentColor;
+  }
+  .result-sub { font-size:0.9rem; letter-spacing:0.2em; color:rgba(255,255,255,0.4); }
+  .result-btns { display:flex; gap:1rem; }
+
+  /* ── MISC ── */
+  .notification {
+    position:fixed; top:70px; left:50%; transform:translateX(-50%);
+    background:rgba(0,245,255,0.1); border:1px solid rgba(0,245,255,0.3);
+    color:var(--neon-cyan); font-size:0.75rem; letter-spacing:0.15em;
+    padding:0.5rem 1.5rem; border-radius:2px; z-index:200;
+    pointer-events:none; opacity:0; transition:opacity 0.3s;
+  }
+  .notification.show { opacity:1; }
+
+  /* hide touch controls on desktop if desired — commented out so they always show */
+</style>
+</head>
+<body>
+
+<!-- ─── CORNERS ─── -->
+<div class="corner-deco tl"></div>
+<div class="corner-deco tr"></div>
+<div class="corner-deco bl"></div>
+<div class="corner-deco br"></div>
+
+<!-- ─── NOTIFICATION ─── -->
+<div class="notification" id="notification"></div>
+
+<!-- ═══════════════════════════════════ LOGIN ═══════════════════════════════════ -->
+<div class="screen active" id="loginScreen">
+  <div class="login-title">NEON CLASH</div>
+  <div class="login-sub">1v1 arena combat</div>
+  <div class="login-box">
+    <div class="login-label">PLAYER ID</div>
+    <input class="login-input" id="loginInput" type="text" placeholder="enter callsign..." maxlength="16" autocomplete="off" spellcheck="false">
+    <button class="btn-primary" id="loginBtn">ENTER ARENA</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ LOBBY ═══════════════════════════════════ -->
+<div class="screen" id="lobbyScreen">
+  <div style="font-family:'Orbitron',sans-serif;font-size:1.4rem;font-weight:900;letter-spacing:0.2em;color:#fff;text-shadow:0 0 15px var(--neon-cyan);margin-bottom:1.5rem;">NEON CLASH — LOBBY</div>
+  <div class="lobby-layout">
+
+    <!-- Players online -->
+    <div class="lobby-panel">
+      <div class="panel-title">◈ ONLINE PLAYERS</div>
+      <div class="player-list" id="playerList"></div>
+      <div class="status-bar" id="onlineCount">0 players online</div>
+    </div>
+
+    <!-- Customise + rooms -->
+    <div class="lobby-panel">
+      <div class="panel-title">◈ CUSTOMIZE</div>
+      <div style="font-size:0.65rem;letter-spacing:0.15em;color:rgba(0,245,255,0.5);">COLOR</div>
+      <div class="color-grid" id="colorGrid"></div>
+      <div style="font-size:0.65rem;letter-spacing:0.15em;color:rgba(0,245,255,0.5);margin-top:0.5rem;">SHAPE</div>
+      <div class="shape-row">
+        <div class="shape-btn selected" id="shapeRect" onclick="selectShape('rect')">
+          <canvas class="shape-preview" id="previewRect"></canvas>
+          <span>SQUARE</span>
+        </div>
+        <div class="shape-btn" id="shapeCircle" onclick="selectShape('circle')">
+          <canvas class="shape-preview" id="previewCircle"></canvas>
+          <span>CIRCLE</span>
+        </div>
+      </div>
+      <div class="panel-title" style="margin-top:0.5rem;">◈ ROOMS</div>
+      <div class="room-list" id="roomList"></div>
+      <div class="lobby-actions">
+        <button class="btn-primary" id="createRoomBtn">+ CREATE ROOM</button>
+      </div>
+    </div>
+
+    <!-- My info -->
+    <div class="lobby-panel">
+      <div class="panel-title">◈ MY STATUS</div>
+      <div style="display:flex;flex-direction:column;gap:0.6rem;">
+        <div style="font-size:0.65rem;color:rgba(0,245,255,0.5);letter-spacing:0.15em;">CALLSIGN</div>
+        <div id="myName" style="font-size:1.1rem;font-family:'Orbitron',sans-serif;color:#fff;"></div>
+        <div style="font-size:0.65rem;color:rgba(0,245,255,0.5);letter-spacing:0.15em;margin-top:0.5rem;">PREVIEW</div>
+        <canvas id="playerPreview" width="100" height="100" style="border:1px solid rgba(0,245,255,0.15);border-radius:3px;background:rgba(0,0,0,0.4);"></canvas>
+      </div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:0.5rem;">
+        <button class="btn-sm btn-danger" onclick="logout()">← LOGOUT</button>
+      </div>
+      <div class="status-bar">Socket.io ready (mock)</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════ GAME ════════════════════════════════════ -->
+<div class="screen" id="gameScreen">
+  <!-- HUD Top -->
+  <div class="hud-top">
+    <div class="hud-player" id="hudLeft">
+      <div class="hud-name" id="hudLeftName">PLAYER 1</div>
+      <div class="hp-bar-wrap">
+        <div class="hp-bar-fill" id="hudLeftHP" style="width:100%;background:var(--neon-cyan);"></div>
+      </div>
+      <div style="font-size:0.7rem;font-family:'Orbitron',sans-serif;" id="hudLeftHPNum">100</div>
+    </div>
+    <div class="hud-center">
+      <div class="hud-timer" id="hudTimer">03:00</div>
+      <div class="hud-round">ROUND 1</div>
+    </div>
+    <div class="hud-player right" id="hudRight">
+      <div class="hud-name" id="hudRightName">PLAYER 2</div>
+      <div class="hp-bar-wrap">
+        <div class="hp-bar-fill" id="hudRightHP" style="width:100%;background:var(--neon-pink);"></div>
+      </div>
+      <div style="font-size:0.7rem;font-family:'Orbitron',sans-serif;" id="hudRightHPNum">100</div>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Touch Controls -->
+  <div class="touch-controls" id="touchControls">
+    <!-- D-pad left -->
+    <div class="dpad" id="dpad">
+      <div></div>
+      <div class="dpad-btn" id="btnUp"   data-dir="up">▲</div>
+      <div></div>
+      <div class="dpad-btn" id="btnLeft" data-dir="left">◀</div>
+      <div class="dpad-center"></div>
+      <div class="dpad-btn" id="btnRight" data-dir="right">▶</div>
+      <div></div>
+      <div class="dpad-btn" id="btnDown"  data-dir="down">▼</div>
+      <div></div>
+    </div>
+
+    <!-- Right: ult gauge + action buttons -->
+    <div class="action-btns">
+      <div class="ult-gauge-wrap">
+        <div class="ult-gauge-label">ULT</div>
+        <div class="ult-gauge-bar"><div class="ult-gauge-fill" id="touchUltGauge"></div></div>
+      </div>
+      <div class="action-row">
+        <div class="action-btn btn-ult" id="btnUlt" ontouchstart="touchAction('ult')">ULT</div>
+        <div class="action-btn btn-dash" id="btnDash" ontouchstart="touchAction('dash')">DASH</div>
+        <div class="action-btn btn-attack" id="btnAttack" ontouchstart="touchAction('attack')">ATTACK</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result overlay -->
+  <div id="resultOverlay">
+    <div class="result-title" id="resultTitle"></div>
+    <div class="result-sub" id="resultSub"></div>
+    <div class="result-btns">
+      <button class="btn-primary" id="resultRematch">REMATCH</button>
+      <button class="btn-sm" onclick="goLobby()">BACK TO LOBBY</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   NEON CLASH — Full Game Engine
+   Author: Generated for demo
+   Architecture: Single-file HTML5 Canvas + CSS
+   Socket.io: Stubbed (mock sync layer)
+══════════════════════════════════════════════════════════ */
+
+// ─── CONFIG ──────────────────────────────────────────────
+const CFG = {
+  playerSpeed: 180,       // px/s
+  dashMult:    2.5,
+  dashDuration: 220,      // ms
+  dashCooldown: 1800,     // ms
+  bulletSpeed:  520,
+  bulletLife:   1.2,      // seconds (max range)
+  bulletSize:   5,
+  playerSize:   22,
+  maxHP:        100,
+  normalDmg:    10,
+  ultDmg:       35,
+  ultGaugePerHit: 22,
+  ultGaugePerSec: 3,
+  ultBullets:   12,
+  gameTime:     180,      // seconds
+  screenShakeHit: 4,
+  screenShakeUlt: 9,
+};
+
+// ─── COLORS ──────────────────────────────────────────────
+const COLORS = [
+  '#00f5ff','#ff006e','#ffe600','#00ff88',
+  '#ff5500','#cc44ff','#ff4488','#44ccff',
+  '#88ff00','#ffffff',
+];
+
+// ─── STATE ───────────────────────────────────────────────
+let myId   = null;
+let myName = '';
+let myColor= COLORS[0];
+let myShape= 'rect';
+
+// Lobby mock data
+let lobbyPlayers = [];
+let lobbyRooms   = [];
+
+// Game state
+let gameState = null;
+let animId    = null;
+let lastTime  = 0;
+
+// Input
+const keys = {};
+const touchDirs = { up:false, down:false, left:false, right:false };
+
+// Screen shake
+let shakeTime = 0;
+let shakeMag  = 0;
+
+// ─── SOCKET (MOCK STUB) ───────────────────────────────────
+const socket = {
+  _handlers: {},
+  on(ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); },
+  emit(ev, data) {
+    console.log('[Socket EMIT]', ev, data);
+    // Simulate server echo for demo
+    setTimeout(() => this._trigger(ev + '_ack', data), 60);
+  },
+  _trigger(ev, data) {
+    (this._handlers[ev] || []).forEach(fn => fn(data));
+  },
+  // ── mock lobby updates ──
+  mockInit() {
+    // Fake players
+    const fakeNames = ['ZERO_X','PHANTOM','BLADE_7','NOVA','CRUX'];
+    fakeNames.forEach((n,i) => {
+      lobbyPlayers.push({ id:'bot'+i, name:n, color:COLORS[(i+1)%COLORS.length], shape:i%2?'circle':'rect', status:'idle' });
+    });
+    // Fake rooms
+    lobbyRooms.push({ id:'r1', name:'ARENA-01', host:'ZERO_X', count:1, max:2 });
+    lobbyRooms.push({ id:'r2', name:'DEATH MATCH', host:'NOVA', count:2, max:2 });
+    renderLobby();
+  }
+};
+
+// ─── UTILS ───────────────────────────────────────────────
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function lerp(a,b,t){ return a+(b-a)*t; }
+function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+function uuid(){ return Math.random().toString(36).slice(2,9); }
+
+function notify(msg, dur=2200) {
+  const el = document.getElementById('notification');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), dur);
+}
+
+// ─── SCREENS ─────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// ─── LOGIN ───────────────────────────────────────────────
+document.getElementById('loginBtn').onclick = doLogin;
+document.getElementById('loginInput').onkeydown = e => { if(e.key==='Enter') doLogin(); };
+
+function doLogin() {
+  const val = document.getElementById('loginInput').value.trim();
+  if(!val) { notify('ENTER A CALLSIGN'); return; }
+  myName = val.toUpperCase().slice(0,16);
+  myId   = uuid();
+  document.getElementById('myName').textContent = myName;
+  socket.emit('login', { id:myId, name:myName, color:myColor, shape:myShape });
+  buildLobbyUI();
+  socket.mockInit();
+  showScreen('lobbyScreen');
+}
+
+function logout() {
+  socket.emit('logout', { id:myId });
+  showScreen('loginScreen');
+}
+
+// ─── LOBBY UI ────────────────────────────────────────────
+function buildLobbyUI() {
+  // Color grid
+  const grid = document.getElementById('colorGrid');
+  grid.innerHTML = '';
+  COLORS.forEach(c => {
+    const sw = document.createElement('div');
+    sw.className = 'color-swatch' + (c===myColor?' selected':'');
+    sw.style.background = c;
+    sw.style.boxShadow = `0 0 8px ${c}55`;
+    sw.onclick = () => { myColor=c; updateColorSwatches(); updatePreview(); };
+    grid.appendChild(sw);
+  });
+  // Shape previews
+  drawShapePreview('previewRect','rect');
+  drawShapePreview('previewCircle','circle');
+  updatePreview();
+  renderLobby();
+}
+
+function updateColorSwatches() {
+  document.querySelectorAll('.color-swatch').forEach((sw,i) => {
+    sw.classList.toggle('selected', COLORS[i]===myColor);
+  });
+}
+
+function selectShape(s) {
+  myShape = s;
+  document.getElementById('shapeRect').classList.toggle('selected', s==='rect');
+  document.getElementById('shapeCircle').classList.toggle('selected', s==='circle');
+  updatePreview();
+}
+
+function drawShapePreview(canvasId, shape) {
+  const c = document.getElementById(canvasId);
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,30,30);
+  ctx.fillStyle = '#00f5ff88';
+  ctx.strokeStyle = '#00f5ff';
+  ctx.lineWidth = 2;
+  if(shape==='rect') {
+    ctx.fillRect(5,5,20,20); ctx.strokeRect(5,5,20,20);
+  } else {
+    ctx.beginPath(); ctx.arc(15,15,11,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+  }
+}
+
+function updatePreview() {
+  const c = document.getElementById('playerPreview');
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,100,100);
+  ctx.fillStyle = myColor+'33';
+  ctx.strokeStyle = myColor;
+  ctx.lineWidth = 2.5;
+  ctx.shadowColor = myColor;
+  ctx.shadowBlur = 12;
+  if(myShape==='rect') {
+    ctx.fillRect(30,30,40,40); ctx.strokeRect(30,30,40,40);
+    // direction nub
+    ctx.fillStyle = myColor;
+    ctx.fillRect(46,22,8,12);
+  } else {
+    ctx.beginPath(); ctx.arc(50,50,20,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = myColor;
+    ctx.beginPath(); ctx.arc(50,32,5,0,Math.PI*2); ctx.fill();
+  }
+}
+
+function renderLobby() {
+  // Players
+  const pl = document.getElementById('playerList');
+  const allPlayers = [
+    { id:myId, name:myName, color:myColor, shape:myShape, status:'idle (you)' },
+    ...lobbyPlayers
+  ];
+  pl.innerHTML = allPlayers.map(p => `
+    <div class="player-item">
+      <div class="player-color-dot" style="background:${p.color};box-shadow:0 0 6px ${p.color}"></div>
+      <div class="player-name">${p.name}</div>
+      <div class="player-status">${p.status||'idle'}</div>
+    </div>
+  `).join('');
+  document.getElementById('onlineCount').textContent = allPlayers.length + ' players online';
+
+  // Rooms
+  const rl = document.getElementById('roomList');
+  rl.innerHTML = lobbyRooms.map(r => `
+    <div class="room-item">
+      <div class="room-info">
+        <div class="room-name">${r.name}</div>
+        <div class="room-count">${r.count}/${r.max} · host: ${r.host}</div>
+      </div>
+      <button class="btn-sm" onclick="joinRoom('${r.id}')" ${r.count>=r.max?'disabled style="opacity:0.3"':''}>
+        ${r.count>=r.max?'FULL':'JOIN'}
+      </button>
+    </div>
+  `).join('');
+}
+
+document.getElementById('createRoomBtn').onclick = () => {
+  notify('Creating room...');
+  setTimeout(() => startGame('pvp'), 600);
+};
+
+function joinRoom(id) {
+  notify('Joining room...');
+  setTimeout(() => startGame('pvp'), 600);
+}
+
+// ─── GAME ENGINE ─────────────────────────────────────────
+const canvas = document.getElementById('gameCanvas');
+const ctx    = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', () => {
+  resizeCanvas();
+  if(gameState) positionPlayers();
+});
+resizeCanvas();
+
+function positionPlayers() {
+  const W = canvas.width, H = canvas.height;
+  gameState.p1.x = W * 0.25;
+  gameState.p1.y = H * 0.5;
+  gameState.p2.x = W * 0.75;
+  gameState.p2.y = H * 0.5;
+}
+
+function makePlayer(id, name, color, shape, isLocal) {
+  return {
+    id, name, color, shape, isLocal,
+    x:0, y:0, vx:0, vy:0,
+    hp: CFG.maxHP,
+    facing: isLocal ? 1 : -1,   // 1=right, -1=left
+    ultGauge: 0,
+    dashActive: false, dashTimer: 0, dashCooldownTimer: 0,
+    attackCooldown: 0,
+    ultCooldown: 0,
+    isDead: false,
+    trail: [],
+  };
+}
+
+function startGame(mode) {
+  showScreen('gameScreen');
+  resizeCanvas();
+
+  // Create local + bot opponent
+  const p1 = makePlayer(myId, myName, myColor, myShape, true);
+  const bot = lobbyPlayers[0] || { id:'bot0', name:'PHANTOM', color:COLORS[1], shape:'circle' };
+  const p2 = makePlayer(bot.id, bot.name, bot.color, bot.shape, false);
+
+  gameState = {
+    p1, p2,
+    bullets:  [],
+    particles:[],
+    timeLeft: CFG.gameTime,
+    running:  true,
+    mode,
+  };
+
+  positionPlayers();
+  updateHUD();
+
+  // Reset result overlay
+  document.getElementById('resultOverlay').classList.remove('show');
+
+  // Start loop
+  lastTime = performance.now();
+  if(animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(gameLoop);
+}
+
+// ─── INPUT ───────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if(!gameState) return;
+  if(e.code==='Space')      { e.preventDefault(); doAttack(gameState.p1, gameState.p2); }
+  if(e.code==='ShiftLeft')  { e.preventDefault(); doDash(gameState.p1); }
+  if(e.code==='ControlLeft'){ e.preventDefault(); doUlt(gameState.p1, gameState.p2); }
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// D-pad touch
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  const dir = btn.dataset.dir;
+  btn.addEventListener('touchstart', e => { e.preventDefault(); touchDirs[dir]=true; btn.classList.add('pressed'); });
+  btn.addEventListener('touchend',   e => { e.preventDefault(); touchDirs[dir]=false; btn.classList.remove('pressed'); });
+  btn.addEventListener('touchcancel',e => { touchDirs[dir]=false; btn.classList.remove('pressed'); });
+  // Mouse fallback
+  btn.addEventListener('mousedown', () => touchDirs[dir]=true);
+  btn.addEventListener('mouseup',   () => touchDirs[dir]=false);
+});
+
+function touchAction(action) {
+  if(!gameState) return;
+  if(action==='attack') doAttack(gameState.p1, gameState.p2);
+  if(action==='dash')   doDash(gameState.p1);
+  if(action==='ult')    doUlt(gameState.p1, gameState.p2);
+}
+
+// ─── ACTIONS ─────────────────────────────────────────────
+function doAttack(shooter, target) {
+  if(!gameState.running) return;
+  if(shooter.attackCooldown > 0) return;
+  shooter.attackCooldown = 0.28;
+  // Aim toward target
+  const dx = target.x - shooter.x;
+  const dy = target.y - shooter.y;
+  const len = Math.hypot(dx,dy)||1;
+  spawnBullet(shooter, dx/len, dy/len, false);
+  socket.emit('shoot', { id:shooter.id, dx:dx/len, dy:dy/len });
+}
+
+function doDash(player) {
+  if(!gameState.running) return;
+  if(player.dashCooldownTimer > 0) return;
+  player.dashActive   = true;
+  player.dashTimer    = CFG.dashDuration;
+  player.dashCooldownTimer = CFG.dashCooldown;
+  spawnTrailBurst(player, 8, player.color);
+  document.getElementById('btnDash').classList.add('cooldown');
+  setTimeout(() => document.getElementById('btnDash').classList.remove('cooldown'), CFG.dashCooldown);
+  socket.emit('dash', { id:player.id });
+}
+
+function doUlt(player, target) {
+  if(!gameState.running) return;
+  if(player.ultGauge < 100) { notify('ULT GAUGE NOT FULL'); return; }
+  player.ultGauge = 0;
+  document.getElementById('btnUlt').classList.remove('ready');
+  // Spiral bullets
+  for(let i=0;i<CFG.ultBullets;i++) {
+    const angle = (i/CFG.ultBullets)*Math.PI*2;
+    spawnBullet(player, Math.cos(angle), Math.sin(angle), true);
+  }
+  // Screen shake
+  triggerShake(CFG.screenShakeUlt);
+  spawnExplosion(player.x, player.y, player.color, 28);
+  socket.emit('ult', { id:player.id });
+}
+
+function spawnBullet(shooter, dx, dy, isUlt) {
+  gameState.bullets.push({
+    x: shooter.x, y: shooter.y,
+    vx: dx * CFG.bulletSpeed,
+    vy: dy * CFG.bulletSpeed,
+    ownerId: shooter.id,
+    ownerColor: shooter.color,
+    life: CFG.bulletLife,
+    isUlt,
+    r: isUlt ? 7 : CFG.bulletSize,
+  });
+}
+
+// ─── GAME LOOP ───────────────────────────────────────────
+function gameLoop(now) {
+  if(!gameState) return;
+  const dt = Math.min((now - lastTime)/1000, 0.1);
+  lastTime = now;
+
+  if(gameState.running) {
+    updateGame(dt);
+    updateHUD();
+  }
+  render(dt);
+  animId = requestAnimationFrame(gameLoop);
+}
+
+function updateGame(dt) {
+  const { p1, p2 } = gameState;
+
+  // Timer
+  gameState.timeLeft -= dt;
+  if(gameState.timeLeft <= 0) { endGame('time'); return; }
+
+  // Bot AI (simple)
+  updateBot(p2, p1, dt);
+
+  // Local player movement
+  movePlayer(p1, dt);
+  movePlayer(p2, dt);
+
+  // Cooldowns
+  tickCooldowns(p1, dt);
+  tickCooldowns(p2, dt);
+
+  // Ult gauge fill over time
+  p1.ultGauge = Math.min(100, p1.ultGauge + CFG.ultGaugePerSec * dt);
+  p2.ultGauge = Math.min(100, p2.ultGauge + CFG.ultGaugePerSec * dt);
+
+  // Bullets
+  updateBullets(dt);
+
+  // Shake
+  if(shakeTime > 0) shakeTime -= dt;
+
+  // Particles
+  gameState.particles = gameState.particles.filter(p => {
+    p.life -= dt;
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    p.vy += 120*dt;
+    return p.life > 0;
+  });
+
+  // ULT button UI
+  document.getElementById('btnUlt').classList.toggle('ready', p1.ultGauge >= 100);
+  document.getElementById('touchUltGauge').style.width = p1.ultGauge + '%';
+}
+
+function tickCooldowns(p, dt) {
+  if(p.attackCooldown>0) p.attackCooldown -= dt;
+  if(p.dashCooldownTimer>0) p.dashCooldownTimer -= dt;
+  if(p.dashTimer>0) {
+    p.dashTimer -= dt*1000;
+    if(p.dashTimer<=0) p.dashActive=false;
+  }
+}
+
+function movePlayer(p, dt) {
+  const W = canvas.width, H = canvas.height;
+  const hudH = 56, ctrlH = 180;
+  let nx=0, ny=0;
+
+  if(p.isLocal) {
+    if(keys['KeyW']||keys['ArrowUp']||touchDirs.up)    ny=-1;
+    if(keys['KeyS']||keys['ArrowDown']||touchDirs.down) ny=1;
+    if(keys['KeyA']||keys['ArrowLeft']||touchDirs.left) nx=-1;
+    if(keys['KeyD']||keys['ArrowRight']||touchDirs.right)nx=1;
+  }
+
+  if(nx||ny) {
+    const len = Math.hypot(nx,ny);
+    nx/=len; ny/=len;
+    if(nx!==0) p.facing = Math.sign(nx);
+  }
+
+  const spd = CFG.playerSpeed * (p.dashActive ? CFG.dashMult : 1);
+  p.x = clamp(p.x + nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
+  p.y = clamp(p.y + ny*spd*dt, hudH+CFG.playerSize, H-ctrlH-CFG.playerSize);
+
+  // trail during dash
+  if(p.dashActive && Math.random()<0.6) {
+    gameState.particles.push({
+      x:p.x+( Math.random()-0.5)*10,
+      y:p.y+( Math.random()-0.5)*10,
+      vx:(Math.random()-0.5)*30, vy:(Math.random()-0.5)*30,
+      life:0.25, color:p.color, r:4,
+    });
+  }
+}
+
+// ─── BOT AI ──────────────────────────────────────────────
+const bot = { dirTimer:0, nx:1, ny:0, atkTimer:0, dashTimer2:0 };
+function updateBot(b, target, dt) {
+  // Move toward player with slight random offset
+  bot.dirTimer -= dt;
+  if(bot.dirTimer<=0) {
+    bot.dirTimer = 0.5+Math.random()*0.5;
+    const dx = target.x-b.x + (Math.random()-0.5)*120;
+    const dy = target.y-b.y + (Math.random()-0.5)*120;
+    const len = Math.hypot(dx,dy)||1;
+    bot.nx = dx/len; bot.ny = dy/len;
+  }
+  b.facing = Math.sign(bot.nx)||b.facing;
+  const spd = CFG.playerSpeed * (b.dashActive?CFG.dashMult:1);
+  const W=canvas.width, H=canvas.height;
+  b.x = clamp(b.x+bot.nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
+  b.y = clamp(b.y+bot.ny*spd*dt, 56+CFG.playerSize, H-180-CFG.playerSize);
+
+  // Attack
+  bot.atkTimer -= dt;
+  if(bot.atkTimer<=0 && dist(b,target)<350) {
+    bot.atkTimer = 0.5+Math.random()*0.4;
+    if(b.attackCooldown<=0) doAttack(b, target);
+  }
+
+  // Dash
+  bot.dashTimer2 -= dt;
+  if(bot.dashTimer2<=0 && Math.random()<0.02) {
+    bot.dashTimer2 = 3;
+    doDash(b);
+  }
+
+  // Ult
+  if(b.ultGauge>=100 && Math.random()<0.01) doUlt(b,target);
+}
+
+// ─── BULLETS ─────────────────────────────────────────────
+function updateBullets(dt) {
+  const { p1, p2, bullets } = gameState;
+  const players = [p1, p2];
+
+  gameState.bullets = bullets.filter(b => {
+    b.x += b.vx*dt; b.y += b.vy*dt;
+    b.life -= dt;
+    if(b.life<=0) return false;
+
+    // Boundary
+    if(b.x<0||b.x>canvas.width||b.y<0||b.y>canvas.height) return false;
+
+    // Collision
+    for(const p of players) {
+      if(p.id===b.ownerId || p.isDead) continue;
+      const dmg = b.isUlt ? CFG.ultDmg : CFG.normalDmg;
+      let hit = false;
+      if(p.shape==='rect') {
+        // AABB
+        const hs = CFG.playerSize;
+        hit = Math.abs(b.x-p.x)<hs+b.r && Math.abs(b.y-p.y)<hs+b.r;
+      } else {
+        hit = dist(b,p) < CFG.playerSize+b.r;
+      }
+      if(hit) {
+        p.hp = Math.max(0, p.hp-dmg);
+        // Ult gauge for shooter
+        const shooter = players.find(pl=>pl.id===b.ownerId);
+        if(shooter) shooter.ultGauge = Math.min(100, shooter.ultGauge+CFG.ultGaugePerHit);
+        // Shake + particles
+        triggerShake(b.isUlt ? CFG.screenShakeUlt : CFG.screenShakeHit);
+        spawnExplosion(b.x, b.y, b.ownerColor, b.isUlt?14:6);
+        socket.emit('hit', { targetId:p.id, dmg, hp:p.hp });
+        if(p.hp<=0) { p.isDead=true; endGame(b.ownerId===p1.id?'p1':'p2'); }
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+// ─── PARTICLES ───────────────────────────────────────────
+function spawnExplosion(x,y,color,count) {
+  for(let i=0;i<count;i++) {
+    const angle = Math.random()*Math.PI*2;
+    const spd   = 60+Math.random()*200;
+    gameState.particles.push({
+      x,y,
+      vx:Math.cos(angle)*spd, vy:Math.sin(angle)*spd,
+      life: 0.3+Math.random()*0.4,
+      color, r:2+Math.random()*3,
+    });
+  }
+}
+function spawnTrailBurst(p,count,color) {
+  for(let i=0;i<count;i++) {
+    gameState.particles.push({
+      x:p.x+(Math.random()-0.5)*20,
+      y:p.y+(Math.random()-0.5)*20,
+      vx:(Math.random()-0.5)*80, vy:(Math.random()-0.5)*80,
+      life:0.35, color, r:3,
+    });
+  }
+}
+
+// ─── SHAKE ───────────────────────────────────────────────
+function triggerShake(mag) { shakeTime=0.3; shakeMag=mag; }
+function getShakeOffset() {
+  if(shakeTime<=0) return {x:0,y:0};
+  const t=shakeTime/0.3;
+  return {
+    x:(Math.random()-0.5)*2*shakeMag*t,
+    y:(Math.random()-0.5)*2*shakeMag*t
+  };
+}
+
+// ─── RENDER ──────────────────────────────────────────────
+function render() {
+  const W=canvas.width, H=canvas.height;
+  const { p1, p2, bullets, particles } = gameState;
+  const shake = getShakeOffset();
+
+  ctx.save();
+  ctx.translate(shake.x, shake.y);
+
+  // ── Background + grid ──
+  ctx.fillStyle = '#050810';
+  ctx.fillRect(-10,-10,W+20,H+20);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(0,245,255,0.04)';
+  ctx.lineWidth=1;
+  const gs=60;
+  for(let x=0;x<W+gs;x+=gs){
+    ctx.beginPath(); ctx.moveTo(x,56); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for(let y=56;y<H+gs;y+=gs){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+
+  // Center line
+  ctx.strokeStyle='rgba(0,245,255,0.08)'; ctx.lineWidth=1; ctx.setLineDash([8,12]);
+  ctx.beginPath(); ctx.moveTo(W/2,56); ctx.lineTo(W/2,H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── Particles ──
+  particles.forEach(p => {
+    const alpha = clamp(p.life*3,0,1);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
+
+  // ── Bullets ──
+  bullets.forEach(b => {
+    ctx.save();
+    ctx.globalAlpha = clamp(b.life*2,0.4,1);
+    ctx.shadowColor = b.ownerColor;
+    ctx.shadowBlur  = b.isUlt ? 18 : 10;
+    ctx.fillStyle   = '#fff';
+    ctx.strokeStyle = b.ownerColor;
+    ctx.lineWidth   = b.isUlt ? 2 : 1;
+    ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  });
+
+  // ── Players ──
+  drawPlayer(p1);
+  drawPlayer(p2);
+
+  ctx.restore();
+}
+
+function drawPlayer(p) {
+  if(p.isDead) return;
+  ctx.save();
+  const hs = CFG.playerSize;
+
+  // Glow
+  ctx.shadowColor = p.color;
+  ctx.shadowBlur  = p.dashActive ? 25 : 12;
+
+  ctx.strokeStyle = p.color;
+  ctx.lineWidth   = 2.5;
+  ctx.fillStyle   = p.color + '28';
+
+  if(p.shape==='rect') {
+    ctx.fillRect(p.x-hs, p.y-hs, hs*2, hs*2);
+    ctx.strokeRect(p.x-hs, p.y-hs, hs*2, hs*2);
+    // Direction nub
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 8;
+    const nubX = p.x + p.facing*hs;
+    ctx.beginPath();
+    ctx.moveTo(nubX, p.y-7);
+    ctx.lineTo(nubX + p.facing*10, p.y);
+    ctx.lineTo(nubX, p.y+7);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.arc(p.x,p.y,hs,0,Math.PI*2);
+    ctx.fill(); ctx.stroke();
+    // Direction nub
+    ctx.fillStyle = p.color; ctx.shadowBlur=6;
+    ctx.beginPath(); ctx.arc(p.x+p.facing*hs*0.7, p.y, 5,0,Math.PI*2); ctx.fill();
+  }
+
+  // HP mini bar under player
+  const bw=hs*2, bh=4;
+  ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.fillRect(p.x-hs, p.y+hs+5, bw, bh);
+  const pct = p.hp/CFG.maxHP;
+  ctx.fillStyle = pct>0.5? p.color : pct>0.25?'#ffe600':'#ff006e';
+  ctx.fillRect(p.x-hs, p.y+hs+5, bw*pct, bh);
+
+  // Name tag
+  ctx.fillStyle='rgba(255,255,255,0.7)';
+  ctx.font='bold 10px "Share Tech Mono"';
+  ctx.textAlign='center';
+  ctx.fillText(p.name, p.x, p.y-hs-8);
+
+  // Ult ring
+  if(p.ultGauge>=100) {
+    ctx.strokeStyle='#ffe600';
+    ctx.lineWidth=2;
+    ctx.shadowColor='#ffe600'; ctx.shadowBlur=10;
+    ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.arc(p.x,p.y,hs+10,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
+// ─── HUD ─────────────────────────────────────────────────
+function updateHUD() {
+  if(!gameState) return;
+  const { p1,p2,timeLeft } = gameState;
+  // HP bars
+  document.getElementById('hudLeftHP').style.width   = (p1.hp/CFG.maxHP*100)+'%';
+  document.getElementById('hudRightHP').style.width  = (p2.hp/CFG.maxHP*100)+'%';
+  document.getElementById('hudLeftHPNum').textContent  = Math.max(0,Math.round(p1.hp));
+  document.getElementById('hudRightHPNum').textContent = Math.max(0,Math.round(p2.hp));
+  document.getElementById('hudLeftName').textContent  = p1.name;
+  document.getElementById('hudRightName').textContent = p2.name;
+  // Timer
+  const m=Math.floor(timeLeft/60), s=Math.floor(timeLeft%60);
+  document.getElementById('hudTimer').textContent =
+    String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+// ─── GAME OVER ───────────────────────────────────────────
+function endGame(winner) {
+  gameState.running = false;
+  socket.emit('gameEnd', { winner });
+
+  const overlay = document.getElementById('resultOverlay');
+  const title   = document.getElementById('resultTitle');
+  const sub     = document.getElementById('resultSub');
+
+  if(winner==='time') {
+    const { p1,p2 } = gameState;
+    if(p1.hp > p2.hp) { title.textContent='VICTORY'; title.style.color='var(--neon-cyan)'; sub.textContent=p1.name+' wins by HP'; }
+    else if(p2.hp>p1.hp){ title.textContent='DEFEAT'; title.style.color='var(--neon-pink)'; sub.textContent=p2.name+' wins by HP'; }
+    else { title.textContent='DRAW'; title.style.color='var(--neon-yellow)'; sub.textContent='No survivors'; }
+  } else if(winner==='p1') {
+    title.textContent='VICTORY'; title.style.color='var(--neon-cyan)';
+    sub.textContent = gameState.p1.name+' wins!';
+  } else {
+    title.textContent='DEFEAT'; title.style.color='var(--neon-pink)';
+    sub.textContent = gameState.p2.name+' wins!';
+  }
+
+  overlay.classList.add('show');
+  triggerShake(12);
+}
+
+document.getElementById('resultRematch').onclick = () => {
+  const old = gameState;
+  startGame(old.mode);
+};
+
+function goLobby() {
+  cancelAnimationFrame(animId);
+  animId=null; gameState=null;
+  showScreen('lobbyScreen');
+}
+
+// ─── INIT SHAPE PREVIEWS ─────────────────────────────────
+// (called after DOM ready)
+document.addEventListener('DOMContentLoaded', () => {
+  drawShapePreview('previewRect','rect');
+  drawShapePreview('previewCircle','circle');
+});
+
+// Debug shortcut: press G to start game immediately (for testing)
+window.addEventListener('keydown', e => {
+  if(e.code==='KeyG' && !gameState && document.getElementById('lobbyScreen').classList.contains('active')) {
+    startGame('pvp');
+  }
+});
+
+// Prevent default touch behaviors on canvas
+canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+canvas.addEventListener('touchmove',  e=>e.preventDefault(), {passive:false});
+</script>
+</body>
+</html>
