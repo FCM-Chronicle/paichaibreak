@@ -61,7 +61,6 @@ function generateRoomCode() {
 
 /** 고유한 ID를 생성합니다. */
 function uuid() { return Math.random().toString(36).slice(2, 9); }
-}
 
 /** 모든 클라이언트에게 현재 로비 상태를 브로드캐스트 */
 function broadcastLobby() {
@@ -104,6 +103,7 @@ io.on('connection', (socket) => {
       shape:  shape === 'circle' ? 'circle' : 'rect',
       roomId: null,
     };
+    players.set(socket.id, player); // 플레이어 정보 저장 로직 추가
 
     socket.emit('login:ack', { ok: true, player });
     broadcastLobby(); // 새로운 플레이어가 로그인했으므로 로비 상태를 모두에게 브로드캐스트

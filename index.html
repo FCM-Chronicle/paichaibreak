@@ -257,7 +257,7 @@
   .touch-controls {
     position:absolute; bottom:0; left:0; right:0;
     display:flex; justify-content:space-between; align-items:flex-end;
-    padding:0 16px 16px;
+    padding:0 16px 60px; /* 태블릿 가시성을 위해 하단 여백 대폭 증가 */
     z-index:20; pointer-events:none;
     opacity:0.82;
   }
@@ -598,8 +598,15 @@ socket.on('login:ack', ({ ok, player }) => {
 });
 
 socket.on('room:joined', ({ roomId, room }) => {
-  notify(`JOINED ${room.name}`);
-  startGame('pvp');
+  notify(`JOINED ${room.name} (#${room.code})`);
+  notify("Waiting for opponent...", 3000);
+  // 이제 여기서 startGame을 바로 호출하지 않고 game:start 이벤트를 기다립니다.
+});
+
+// 서버에서 게임 시작 신호를 보낼 때 실행
+socket.on('game:start', ({ role, self, opponent }) => {
+  notify(`GAME START! YOU ARE ${role.toUpperCase()}`);
+  startGame(role, self, opponent);
 });
 
 // ─── UTILS ───────────────────────────────────────────────
@@ -726,9 +733,9 @@ function renderLobby() {
     <div class="room-item">
       <div class="room-info">
         <div class="room-name">${r.name}</div>
-        <div class="room-count">${r.count}/${r.max} · host: ${r.host}</div>
+        <div class="room-count">CODE: ${r.code} | ${r.count}/${r.max} · host: ${r.host}</div>
       </div>
-      <button class="btn-sm" onclick="joinRoom('${r.id}')" ${r.count>=r.max?'disabled style="opacity:0.3"':''}>
+      <button class="btn-sm" onclick="joinRoom('${r.code}')" ${r.count>=r.max?'disabled style="opacity:0.3"':''}>
         ${r.count>=r.max?'FULL':'JOIN'}
       </button>
     </div>
@@ -740,8 +747,13 @@ document.getElementById('createRoomBtn').onclick = () => {
   if (roomName) socket.emit('room:create', { roomName });
 };
 
-function joinRoom(id) {
-  socket.emit('room:join', { roomId: id });
+function joinRoom(code) {
+  socket.emit('room:join', { roomCode: code });
+}
+
+function joinRoomByCode() {
+  const code = prompt("ENTER 4-DIGIT ROOM CODE:");
+  if (code) socket.emit('room:join', { roomCode: code });
 }
 
 // ─── GAME ENGINE ─────────────────────────────────────────
@@ -781,14 +793,13 @@ function makePlayer(id, name, color, shape, isLocal) {
   };
 }
 
-function startGame(mode) {
+function startGame(role, selfData, opponentData) {
   showScreen('gameScreen');
   resizeCanvas();
 
-  // Create local + bot opponent
-  const p1 = makePlayer(myId, myName, myColor, myShape, true);
-  const bot = lobbyPlayers[0] || { id:'bot0', name:'PHANTOM', color:COLORS[1], shape:'circle' };
-  const p2 = makePlayer(bot.id, bot.name, bot.color, bot.shape, false);
+  // 실제 플레이어 데이터로 생성
+  const p1 = makePlayer(selfData.id, selfData.name, selfData.color, selfData.shape, true);
+  const p2 = makePlayer(opponentData.id, opponentData.name, opponentData.color, opponentData.shape, false);
 
   gameState = {
     p1, p2,
@@ -796,7 +807,7 @@ function startGame(mode) {
     particles:[],
     timeLeft: CFG.gameTime,
     running:  true,
-    mode,
+    mode: 'pvp',
   };
 
   positionPlayers();
