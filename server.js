@@ -96,18 +96,43 @@ io.on('connection', (socket) => {
   socket.on('login', ({ name, color, shape }) => {
     if (players.has(socket.id)) return;   // 중복 방지
 
+    let baseName = String(name).slice(0, 16).toUpperCase();
+    let finalName = baseName;
+    let counter = 0;
+
+    // 중복 닉네임 확인 및 고유한 닉네임 생성
+    while (true) {
+      let nameExists = false;
+      for (const p of players.values()) {
+        if (p.name === finalName) {
+          nameExists = true;
+          break;
+        }
+      }
+
+      if (!nameExists) {
+        break; // 고유한 닉네임을 찾았으므로 루프 종료
+      }
+
+      // 닉네임이 이미 존재하면 숫자를 붙여 다시 시도
+      counter++;
+      const counterStr = String(counter);
+      const maxBaseLength = 16 - counterStr.length; // 숫자를 붙일 공간을 확보
+      finalName = baseName.slice(0, maxBaseLength) + counterStr;
+    }
+
     const player = {
       id:     socket.id,
-      name:   String(name).slice(0, 16).toUpperCase(),
+      name:   finalName, // 고유한 닉네임 사용
       color:  color || '#00f5ff',
       shape:  shape === 'circle' ? 'circle' : 'rect',
       roomId: null,
     };
-    players.set(socket.id, player); // 플레이어 정보 저장 로직 추가
+    players.set(socket.id, player);
 
-    socket.emit('login:ack', { ok: true, player });
-    broadcastLobby(); // 새로운 플레이어가 로그인했으므로 로비 상태를 모두에게 브로드캐스트
-    console.log(`[login] ${player.name}`);
+    socket.emit('login:ack', { ok: true, player }); // 클라이언트에게 확정된 플레이어 정보 전송
+    broadcastLobby();
+    console.log(`[login] ${player.name} (socket: ${socket.id})`);
   });
 
   // ── 커스터마이즈 변경 ───────────────────────────────

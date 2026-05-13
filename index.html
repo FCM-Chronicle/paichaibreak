@@ -596,7 +596,11 @@ socket.on('lobby:update', ({ playerList, roomList }) => {
 socket.on('login:ack', ({ ok, player }) => {
   if (ok) {
     myId = player.id;
+    myName = player.name; // Ensure myName is updated from server's player object
+    myColor = player.color; // Ensure myColor is updated from server's player object
+    myShape = player.shape; // Ensure myShape is updated from server's player object
     showScreen('lobbyScreen');
+    document.getElementById('myName').textContent = myName; // 서버에서 확정된 이름으로 UI 업데이트
     buildLobbyUI();
   }
 });
@@ -632,7 +636,7 @@ socket.on('game:dash', ({ id }) => {
 });
 
 socket.on('game:hit', ({ targetId, dmg }) => {
-  if (!gameState) return;
+  if (!gameState || !gameState.running) return;
   const target = (gameState.p1.id === targetId) ? gameState.p1 : gameState.p2;
   
   // 피해자가 본인인 경우에만 실제 HP를 깎음 (피해자 기준 동기화)
@@ -681,9 +685,10 @@ document.getElementById('loginInput').onkeydown = e => { if(e.key==='Enter') doL
 function doLogin() {
   const val = document.getElementById('loginInput').value.trim();
   if(!val) { notify('ENTER A CALLSIGN'); return; }
-  myName = val.toUpperCase().slice(0,16);
-  document.getElementById('myName').textContent = myName;
-  socket.emit('login', { name:myName, color:myColor, shape:myShape });
+  
+  // 입력받은 val(닉네임)을 서버로 전송해야 합니다. 
+  // 중복 여부는 서버가 판단하여 login:ack로 결과를 보내줄 것입니다.
+  socket.emit('login', { name: val, color:myColor, shape:myShape });
 }
 
 function logout() {
@@ -836,6 +841,8 @@ function makePlayer(id, name, color, shape, isLocal) {
     hp: CFG.maxHP,
     facing: isLocal ? 1 : -1,   // 1=right, -1=left
     ultGauge: 0,
+    lastMoveX: isLocal ? 1 : -1, // Default direction for bullet/nub if not moving
+    lastMoveY: 0,
     dashActive: false, dashTimer: 0, dashCooldownTimer: 0,
     attackCooldown: 0,
     ultCooldown: 0,
@@ -925,10 +932,18 @@ function doAttack(shooter, target) {
   if(!gameState.running) return;
   if(shooter.attackCooldown > 0) return;
   shooter.attackCooldown = 0.28;
-  // Aim toward target
-  const dx = target.x - shooter.x;
-  const dy = target.y - shooter.y;
-  const len = Math.hypot(dx,dy)||1;
+  
+  let dx, dy;
+  if (shooter.lastMoveX !== 0 || shooter.lastMoveY !== 0) {
+    // Move in the last known movement direction
+    dx = shooter.lastMoveX;
+    dy = shooter.lastMoveY;
+  } else {
+    // If stationary, shoot in the facing direction
+    dx = shooter.facing;
+    dy = 0;
+  }
+  const len = Math.hypot(dx, dy) || 1;
   spawnBullet(shooter, dx/len, dy/len, false);
   if(shooter.isLocal) socket.emit('game:shoot', { dx:dx/len, dy:dy/len });
 }
@@ -1058,6 +1073,11 @@ function movePlayer(p, dt) {
     const len = Math.hypot(nx,ny);
     nx/=len; ny/=len;
     if(nx!==0) p.facing = Math.sign(nx);
+  }
+
+  if (nx !== 0 || ny !== 0) {
+    p.lastMoveX = nx;
+    p.lastMoveY = ny;
   }
 
   const spd = CFG.playerSpeed * (p.dashActive ? CFG.dashMult : 1);
@@ -1237,24 +1257,45 @@ function drawPlayer(p) {
     ctx.fillRect(p.x-hs, p.y-hs, hs*2, hs*2);
     ctx.strokeRect(p.x-hs, p.y-hs, hs*2, hs*2);
     // Direction nub
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    let angle = 0;
+    if (p.lastMoveX !== 0 || p.lastMoveY !== 0) {
+      angle = Math.atan2(p.lastMoveY, p.lastMoveX);
+    } else {
+      angle = p.facing === 1 ? 0 : Math.PI; // Default to facing direction if stationary
+    }
+    ctx.rotate(angle);
     ctx.fillStyle = p.color;
     ctx.shadowBlur = 8;
-    const nubX = p.x + p.facing*hs;
     ctx.beginPath();
-    ctx.moveTo(nubX, p.y-7);
-    ctx.lineTo(nubX + p.facing*10, p.y);
-    ctx.lineTo(nubX, p.y+7);
-    ctx.closePath(); ctx.fill();
+    ctx.moveTo(hs, -7);
+    ctx.lineTo(hs + 10, 0);
+    ctx.lineTo(hs, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   } else {
     ctx.beginPath(); ctx.arc(p.x,p.y,hs,0,Math.PI*2);
     ctx.fill(); ctx.stroke();
     // Direction nub
-    ctx.fillStyle = p.color; ctx.shadowBlur=6;
-    ctx.beginPath(); ctx.arc(p.x+p.facing*hs*0.7, p.y, 5,0,Math.PI*2); ctx.fill();
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    let angle = 0;
+    if (p.lastMoveX !== 0 || p.lastMoveY !== 0) {
+      angle = Math.atan2(p.lastMoveY, p.lastMoveX);
+    } else {
+      angle = p.facing === 1 ? 0 : Math.PI; // Default to facing direction if stationary
+    }
+    ctx.rotate(angle);
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.arc(hs*0.7, 0, 5,0,Math.PI*2); ctx.fill();
+    ctx.restore();
   }
 
   // HP mini bar under player
-  const bw=hs*2, bh=4;
+  const bw=hs*2, bh=4; // Changed to const
   ctx.shadowBlur=0;
   ctx.fillStyle='rgba(0,0,0,0.5)';
   ctx.fillRect(p.x-hs, p.y+hs+5, bw, bh);
