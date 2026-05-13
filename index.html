@@ -631,9 +631,25 @@ socket.on('game:dash', ({ id }) => {
   if (gameState && gameState.p2.id === id) doDash(gameState.p2);
 });
 
+socket.on('game:hit', ({ targetId, dmg }) => {
+  if (!gameState) return;
+  const target = (gameState.p1.id === targetId) ? gameState.p1 : gameState.p2;
+  
+  // 피해자가 본인인 경우에만 실제 HP를 깎음 (피해자 기준 동기화)
+  if (target.id === myId) {
+    target.hp = Math.max(0, target.hp - dmg);
+    if (target.hp <= 0 && !target.isDead) {
+      target.isDead = true;
+      endGame('p2'); // 내가 죽었으므로 상대 승리
+    }
+  }
+});
+
 socket.on('game:sync', ({ id, x, y, hp, ultGauge }) => {
   if (gameState && gameState.p2.id === id) {
-    gameState.p2.x = x; gameState.p2.y = y;
+    // 직접 대입 대신 보간(Lerp) 처리하여 툭툭 끊기는 현상 방지
+    gameState.p2.targetX = x;
+    gameState.p2.targetY = y;
     gameState.p2.hp = hp; gameState.p2.ultGauge = ultGauge;
   }
 });
@@ -1028,8 +1044,15 @@ function movePlayer(p, dt) {
   }
 
   const spd = CFG.playerSpeed * (p.dashActive ? CFG.dashMult : 1);
-  p.x = clamp(p.x + nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
-  p.y = clamp(p.y + ny*spd*dt, hudH+CFG.playerSize, H-ctrlH-CFG.playerSize);
+  
+  if (p.isLocal) {
+    p.x = clamp(p.x + nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
+    p.y = clamp(p.y + ny*spd*dt, hudH+CFG.playerSize, H-ctrlH-CFG.playerSize);
+  } else if (p.targetX !== undefined) {
+    // 상대방 캐릭터는 서버에서 받은 목표 위치로 부드럽게 따라감
+    p.x = lerp(p.x, p.targetX, 0.2);
+    p.y = lerp(p.y, p.targetY, 0.2);
+  }
 
   // trail during dash
   if(p.dashActive && Math.random()<0.6) {
@@ -1068,15 +1091,16 @@ function updateBullets(dt) {
         hit = dist(b,p) < CFG.playerSize+b.r;
       }
       if(hit) {
-        p.hp = Math.max(0, p.hp-dmg);
+        // 직접 HP를 깎지 않고 서버에 알림 -> 피해자 화면에서 HP 깎임 -> 다시 동기화됨
+        if (b.ownerId === myId) {
+          socket.emit('game:hit', { targetId: p.id, dmg });
+        }
+        
         // Ult gauge for shooter
         const shooter = players.find(pl=>pl.id===b.ownerId);
         if(shooter) shooter.ultGauge = Math.min(100, shooter.ultGauge+CFG.ultGaugePerHit);
-        // Shake + particles
         triggerShake(b.isUlt ? CFG.screenShakeUlt : CFG.screenShakeHit);
         spawnExplosion(b.x, b.y, b.ownerColor, b.isUlt?14:6);
-        socket.emit('hit', { targetId:p.id, dmg, hp:p.hp });
-        if(p.hp<=0) { p.isDead=true; endGame(b.ownerId===p1.id?'p1':'p2'); }
         return false;
       }
     }
@@ -1260,7 +1284,7 @@ function updateHUD() {
 // ─── GAME OVER ───────────────────────────────────────────
 function endGame(winner) {
   gameState.running = false;
-  socket.emit('gameEnd', { winner });
+  socket.emit('game:over', { winnerId: (winner === 'p1' ? gameState.p1.id : gameState.p2.id) });
 
   const overlay = document.getElementById('resultOverlay');
   const title   = document.getElementById('resultTitle');
