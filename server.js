@@ -34,6 +34,7 @@ const players = new Map();
 
 /** @type {Map<string, Room>}   roomId   → Room   */
 const rooms   = new Map();
+const roomCodes = new Map(); // roomCode -> roomId 매핑
 
 /**
  * @type {Map<string, string>} invitedSocketId -> inviterSocketId
@@ -41,16 +42,25 @@ const rooms   = new Map();
  */
 const pendingInvites = new Map();
 /**
- * @typedef {{ id:string, name:string, color:string, shape:string, roomId:string|null }} Player
- * @typedef {{ id:string, name:string, hostId:string, players:string[], state:'waiting'|'playing' }} Room
+ * @typedef {{ id:string, name:string, color:string, shape:string, roomId:string|null }} Player - 플레이어 정보
+ * @typedef {{ id:string, code:string, name:string, hostId:string, players:string[], state:'waiting'|'playing' }} Room - 방 정보
  */
 
 // ════════════════════════════════════════════════════════
 //  유틸
 // ════════════════════════════════════════════════════════
 
-function uuid() {
-  return Math.random().toString(36).slice(2, 9);
+/** 고유한 4자리 숫자 방 코드를 생성합니다. */
+function generateRoomCode() {
+  let code;
+  do {
+    code = Math.floor(1000 + Math.random() * 9000).toString(); // 1000-9999
+  } while (roomCodes.has(code)); // 중복 방지
+  return code;
+}
+
+/** 고유한 ID를 생성합니다. */
+function uuid() { return Math.random().toString(36).slice(2, 9); }
 }
 
 /** 모든 클라이언트에게 현재 로비 상태를 브로드캐스트 */
@@ -65,6 +75,7 @@ function broadcastLobby() {
 
   const roomList = [...rooms.values()].map(r => ({
     id:     r.id,
+    code:   r.code, // 방 코드 포함
     name:   r.name,
     host:   players.get(r.hostId)?.name ?? '?',
     count:  r.players.length,
@@ -93,7 +104,6 @@ io.on('connection', (socket) => {
       shape:  shape === 'circle' ? 'circle' : 'rect',
       roomId: null,
     };
-    players.set(socket.id, player);
 
     socket.emit('login:ack', { ok: true, player });
     broadcastLobby(); // 새로운 플레이어가 로그인했으므로 로비 상태를 모두에게 브로드캐스트
@@ -112,11 +122,16 @@ io.on('connection', (socket) => {
   // ── 방 만들기 ───────────────────────────────────────
   socket.on('room:create', ({ roomName }) => {
     const p = players.get(socket.id);
-    if (!p || p.roomId) return;
+    if (!p || p.roomId) {
+      socket.emit('room:error', { msg: 'Already in a room or not logged in.' });
+      return;
+    }
 
     const roomId = uuid();
+    const roomCode = generateRoomCode();
     const room = {
       id:      roomId,
+      code:    roomCode,
       name:    String(roomName || `${p.name}'s ROOM`).slice(0, 24),
       hostId:  socket.id,
       players: [socket.id],
@@ -124,16 +139,22 @@ io.on('connection', (socket) => {
     };
     rooms.set(roomId, room);
     p.roomId = roomId;
+    roomCodes.set(roomCode, roomId); // 코드-ID 매핑 저장
 
     socket.join(roomId);
     socket.emit('room:joined', { roomId, room: sanitizeRoom(room) });
     broadcastLobby();
-    console.log(`[room:create] ${room.name} by ${p.name}`);
+    console.log(`[room:create] ${room.name} (Code: ${room.code}) by ${p.name}`);
   });
 
   // ── 방 참가 ─────────────────────────────────────────
-  socket.on('room:join', ({ roomId }) => {
+  socket.on('room:join', ({ roomCode }) => {
     const p    = players.get(socket.id);
+    const roomId = roomCodes.get(roomCode);
+    if (!roomId) {
+      socket.emit('room:error', { msg: 'Room not found with that code.' });
+      return;
+    }
     const room = rooms.get(roomId);
     if (!p || !room) return;
     if (p.roomId) return;                         // 이미 방에 있음
@@ -154,7 +175,7 @@ io.on('connection', (socket) => {
     // 2명이 모이면 자동 게임 시작
     if (room.players.length === 2) {
       startRoom(room);
-    }
+    } else { /* 1명만 들어온 경우, 게임 시작 대기 */ }
 
     broadcastLobby();
     console.log(`[room:join] ${p.name} → ${room.name}`);
@@ -381,6 +402,7 @@ function leaveRoom(socket) {
   const room = rooms.get(p.roomId);
   if (room) {
     room.players = room.players.filter(id => id !== socket.id);
+    pendingInvites.delete(socket.id); // 방을 나갈 때 보류 중인 초대도 정리
 
     if (room.players.length === 0) {
       // 빈 방 삭제
@@ -393,6 +415,7 @@ function leaveRoom(socket) {
         msg: `${p.name} has left the room.`,
       });
     }
+    roomCodes.delete(room.code); // 방 코드 매핑도 삭제
   }
 
   socket.leave(p.roomId);
@@ -405,6 +428,7 @@ function leaveRoom(socket) {
 function sanitizeRoom(room) {
   return {
     id:     room.id,
+    code:   room.code, // 방 코드 포함
     name:   room.name,
     host:   players.get(room.hostId)?.name ?? '?',
     count:  room.players.length,
