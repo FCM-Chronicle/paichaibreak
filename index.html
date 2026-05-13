@@ -639,14 +639,32 @@ socket.on('game:dash', ({ id }) => {
 socket.on('game:hit', ({ targetId, dmg }) => {
   if (!gameState || !gameState.running) return;
   const target = (gameState.p1.id === targetId) ? gameState.p1 : gameState.p2;
+  if (!target) return; // Target player not found in current game state
   
-  // 피해자가 본인인 경우에만 실제 HP를 깎음 (피해자 기준 동기화)
-  if (target.id === myId) {
-    target.hp = Math.max(0, target.hp - dmg);
-    if (target.hp <= 0 && !target.isDead) {
-      target.isDead = true;
-      endGame('p2'); // 내가 죽었으므로 상대 승리
-    }
+  // Update HP for the target player on *both* clients
+  target.hp = Math.max(0, target.hp - dmg);
+
+  // Only the client whose player died should initiate the game:over event
+  // This ensures only one game:over event is sent to the server for a given death.
+  if (target.id === myId && target.hp <= 0 && !target.isDead) {
+    target.isDead = true;
+    // If my player (p1) died, then p2 wins.
+    // If my player (p2) died, then p1 wins.
+    endGame(target.id === gameState.p1.id ? 'p2' : 'p1');
+  }
+});
+
+// 서버에서 게임 종료 결과 신호를 보낼 때 실행
+socket.on('game:result', ({ winnerId, winnerName }) => {
+  if (!gameState) return; // Game might have already ended or not started
+
+  gameState.running = false; // Ensure game loop stops
+
+  // Determine who won from my client's perspective and call endGame
+  if (winnerId === myId) {
+    endGame(myId === gameState.p1.id ? 'p1' : 'p2'); // My player won
+  } else {
+    endGame(myId === gameState.p1.id ? 'p2' : 'p1'); // My player lost (opponent won)
   }
 });
 
