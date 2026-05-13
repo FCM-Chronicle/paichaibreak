@@ -575,6 +575,10 @@ let lastTime  = 0;
 // Input
 const keys = {};
 const touchDirs = { up:false, down:false, left:false, right:false };
+const remoteInput = { up:false, down:false, left:false, right:false };
+
+// Sync timer
+let syncTimer = null;
 
 // Screen shake
 let shakeTime = 0;
@@ -607,6 +611,31 @@ socket.on('room:joined', ({ roomId, room }) => {
 socket.on('game:start', ({ role, self, opponent }) => {
   notify(`GAME START! YOU ARE ${role.toUpperCase()}`);
   startGame(role, self, opponent);
+});
+
+// ─── GAME SYNC LISTENERS ────────────────────────────────
+socket.on('game:input', ({ id, up, down, left, right }) => {
+  if (gameState && gameState.p2.id === id) {
+    remoteInput.up = up; remoteInput.down = down;
+    remoteInput.left = left; remoteInput.right = right;
+  }
+});
+
+socket.on('game:shoot', ({ id, dx, dy, isUlt }) => {
+  if (gameState && gameState.p2.id === id) {
+    spawnBullet(gameState.p2, dx, dy, isUlt);
+  }
+});
+
+socket.on('game:dash', ({ id }) => {
+  if (gameState && gameState.p2.id === id) doDash(gameState.p2);
+});
+
+socket.on('game:sync', ({ id, x, y, hp, ultGauge }) => {
+  if (gameState && gameState.p2.id === id) {
+    gameState.p2.x = x; gameState.p2.y = y;
+    gameState.p2.hp = hp; gameState.p2.ultGauge = ultGauge;
+  }
 });
 
 // ─── UTILS ───────────────────────────────────────────────
@@ -820,6 +849,14 @@ function startGame(role, selfData, opponentData) {
   lastTime = performance.now();
   if(animId) cancelAnimationFrame(animId);
   animId = requestAnimationFrame(gameLoop);
+
+  // Start sync emission
+  if(syncTimer) clearInterval(syncTimer);
+  syncTimer = setInterval(() => {
+    if(gameState && gameState.running) {
+      socket.emit('game:sync', { x:p1.x, y:p1.y, hp:p1.hp, ultGauge:p1.ultGauge });
+    }
+  }, 100);
 }
 
 // ─── INPUT ───────────────────────────────────────────────
@@ -860,7 +897,7 @@ function doAttack(shooter, target) {
   const dy = target.y - shooter.y;
   const len = Math.hypot(dx,dy)||1;
   spawnBullet(shooter, dx/len, dy/len, false);
-  socket.emit('shoot', { id:shooter.id, dx:dx/len, dy:dy/len });
+  if(shooter.isLocal) socket.emit('game:shoot', { dx:dx/len, dy:dy/len });
 }
 
 function doDash(player) {
@@ -872,7 +909,7 @@ function doDash(player) {
   spawnTrailBurst(player, 8, player.color);
   document.getElementById('btnDash').classList.add('cooldown');
   setTimeout(() => document.getElementById('btnDash').classList.remove('cooldown'), CFG.dashCooldown);
-  socket.emit('dash', { id:player.id });
+  if(player.isLocal) socket.emit('game:dash');
 }
 
 function doUlt(player, target) {
@@ -888,7 +925,7 @@ function doUlt(player, target) {
   // Screen shake
   triggerShake(CFG.screenShakeUlt);
   spawnExplosion(player.x, player.y, player.color, 28);
-  socket.emit('ult', { id:player.id });
+  if(player.isLocal) socket.emit('game:shoot', { dx:0, dy:0, isUlt:true }); // 서버에 궁극기 발사 알림 (간소화)
 }
 
 function spawnBullet(shooter, dx, dy, isUlt) {
@@ -924,9 +961,6 @@ function updateGame(dt) {
   // Timer
   gameState.timeLeft -= dt;
   if(gameState.timeLeft <= 0) { endGame('time'); return; }
-
-  // Bot AI (simple)
-  updateBot(p2, p1, dt);
 
   // Local player movement
   movePlayer(p1, dt);
@@ -973,12 +1007,19 @@ function movePlayer(p, dt) {
   const hudH = 56, ctrlH = 180;
   let nx=0, ny=0;
 
-  if(p.isLocal) {
-    if(keys['KeyW']||keys['ArrowUp']||touchDirs.up)    ny=-1;
-    if(keys['KeyS']||keys['ArrowDown']||touchDirs.down) ny=1;
-    if(keys['KeyA']||keys['ArrowLeft']||touchDirs.left) nx=-1;
-    if(keys['KeyD']||keys['ArrowRight']||touchDirs.right)nx=1;
-  }
+  const input = p.isLocal ? {
+    up:    keys['KeyW'] || keys['ArrowUp'] || touchDirs.up,
+    down:  keys['KeyS'] || keys['ArrowDown'] || touchDirs.down,
+    left:  keys['KeyA'] || keys['ArrowLeft'] || touchDirs.left,
+    right: keys['KeyD'] || keys['ArrowRight'] || touchDirs.right
+  } : remoteInput;
+
+  if(input.up) ny=-1;
+  if(input.down) ny=1;
+  if(input.left) nx=-1;
+  if(input.right) nx=1;
+
+  if(p.isLocal) socket.emit('game:input', input);
 
   if(nx||ny) {
     const len = Math.hypot(nx,ny);
@@ -999,42 +1040,6 @@ function movePlayer(p, dt) {
       life:0.25, color:p.color, r:4,
     });
   }
-}
-
-// ─── BOT AI ──────────────────────────────────────────────
-const bot = { dirTimer:0, nx:1, ny:0, atkTimer:0, dashTimer2:0 };
-function updateBot(b, target, dt) {
-  // Move toward player with slight random offset
-  bot.dirTimer -= dt;
-  if(bot.dirTimer<=0) {
-    bot.dirTimer = 0.5+Math.random()*0.5;
-    const dx = target.x-b.x + (Math.random()-0.5)*120;
-    const dy = target.y-b.y + (Math.random()-0.5)*120;
-    const len = Math.hypot(dx,dy)||1;
-    bot.nx = dx/len; bot.ny = dy/len;
-  }
-  b.facing = Math.sign(bot.nx)||b.facing;
-  const spd = CFG.playerSpeed * (b.dashActive?CFG.dashMult:1);
-  const W=canvas.width, H=canvas.height;
-  b.x = clamp(b.x+bot.nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
-  b.y = clamp(b.y+bot.ny*spd*dt, 56+CFG.playerSize, H-180-CFG.playerSize);
-
-  // Attack
-  bot.atkTimer -= dt;
-  if(bot.atkTimer<=0 && dist(b,target)<350) {
-    bot.atkTimer = 0.5+Math.random()*0.4;
-    if(b.attackCooldown<=0) doAttack(b, target);
-  }
-
-  // Dash
-  bot.dashTimer2 -= dt;
-  if(bot.dashTimer2<=0 && Math.random()<0.02) {
-    bot.dashTimer2 = 3;
-    doDash(b);
-  }
-
-  // Ult
-  if(b.ultGauge>=100 && Math.random()<0.01) doUlt(b,target);
 }
 
 // ─── BULLETS ─────────────────────────────────────────────
@@ -1286,6 +1291,8 @@ document.getElementById('resultRematch').onclick = () => {
 function goLobby() {
   cancelAnimationFrame(animId);
   animId=null; gameState=null;
+  if(syncTimer) clearInterval(syncTimer);
+  socket.emit('room:leave');
   showScreen('lobbyScreen');
 }
 
