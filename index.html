@@ -430,6 +430,7 @@
       <div class="panel-title" style="margin-top:0.5rem;">◈ ROOMS</div>
       <div class="room-list" id="roomList"></div>
       <div class="lobby-actions">
+        <button class="btn-primary" id="localModeBtn" style="border-color:var(--neon-yellow); color:var(--neon-yellow);">⚡ LOCAL 2P MODE</button>
         <button class="btn-primary" id="createRoomBtn">+ CREATE ROOM</button>
       </div>
     </div>
@@ -614,7 +615,7 @@ socket.on('room:joined', ({ roomId, room }) => {
 // 서버에서 게임 시작 신호를 보낼 때 실행
 socket.on('game:start', ({ role, self, opponent }) => {
   notify(`GAME START! YOU ARE ${role.toUpperCase()}`);
-  startGame(role, self, opponent);
+  startGame('pvp', role, self, opponent);
 });
 
 // ─── GAME SYNC LISTENERS ────────────────────────────────
@@ -851,13 +852,22 @@ function makePlayer(id, name, color, shape, isLocal) {
   };
 }
 
-function startGame(role, selfData, opponentData) {
+function startGame(mode, role, selfData, opponentData) {
   showScreen('gameScreen');
   resizeCanvas();
 
-  // 실제 플레이어 데이터로 생성
-  const p1 = makePlayer(selfData.id, selfData.name, selfData.color, selfData.shape, true);
-  const p2 = makePlayer(opponentData.id, opponentData.name, opponentData.color, opponentData.shape, false);
+  let p1, p2;
+
+  if (mode === 'local') {
+    // 로컬 2인용 설정
+    p1 = makePlayer('p1', 'PLAYER 1', COLORS[0], 'rect', true);
+    p2 = makePlayer('p2', 'PLAYER 2', COLORS[1], 'circle', true);
+    role = 'left'; 
+  } else {
+    // 온라인 PVP 설정
+    p1 = makePlayer(selfData.id, selfData.name, selfData.color, selfData.shape, true);
+    p2 = makePlayer(opponentData.id, opponentData.name, opponentData.color, opponentData.shape, false);
+  }
 
   gameState = {
     p1, p2,
@@ -865,7 +875,7 @@ function startGame(role, selfData, opponentData) {
     particles:[],
     timeLeft: CFG.gameTime,
     running:  true,
-    mode: 'pvp',
+    mode: mode,
   };
 
   positionPlayers(role);
@@ -885,6 +895,8 @@ function startGame(role, selfData, opponentData) {
 
   // Start sync emission
   if(syncTimer) clearInterval(syncTimer);
+  if(mode === 'local') return; // 로컬 모드면 서버 동기화 스킵
+
   syncTimer = setInterval(() => {
     if(gameState && gameState.p1 && gameState.running) {
       const W = canvas.width, H = canvas.height;
@@ -903,9 +915,19 @@ function startGame(role, selfData, opponentData) {
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if(!gameState) return;
+  
+  // Player 1 (Common & Local)
   if(e.code==='Space')      { e.preventDefault(); doAttack(gameState.p1, gameState.p2); }
   if(e.code==='ShiftLeft')  { e.preventDefault(); doDash(gameState.p1); }
-  if(e.code==='ControlLeft'){ e.preventDefault(); doUlt(gameState.p1, gameState.p2); }
+  if(e.code==='KeyQ')       { e.preventDefault(); doUlt(gameState.p1, gameState.p2); }
+  if(e.code==='ControlLeft' && gameState.mode !== 'local'){ e.preventDefault(); doUlt(gameState.p1, gameState.p2); }
+
+  // Player 2 (Local Only)
+  if(gameState.mode === 'local') {
+    if(e.code==='Enter')      { e.preventDefault(); doAttack(gameState.p2, gameState.p1); }
+    if(e.code==='ShiftRight') { e.preventDefault(); doDash(gameState.p2); }
+    if(e.code==='KeyP')       { e.preventDefault(); doUlt(gameState.p2, gameState.p1); }
+  }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -946,6 +968,7 @@ function doAttack(shooter, target) {
   const len = Math.hypot(dx, dy) || 1;
   spawnBullet(shooter, dx/len, dy/len, false);
   if(shooter.isLocal) socket.emit('game:shoot', { dx:dx/len, dy:dy/len });
+  if(shooter.isLocal && gameState.mode !== 'local') socket.emit('game:shoot', { dx:dx/len, dy:dy/len });
 }
 
 function doDash(player) {
@@ -957,7 +980,7 @@ function doDash(player) {
   spawnTrailBurst(player, 8, player.color);
   document.getElementById('btnDash').classList.add('cooldown');
   setTimeout(() => document.getElementById('btnDash').classList.remove('cooldown'), CFG.dashCooldown);
-  if(player.isLocal) socket.emit('game:dash');
+  if(player.isLocal && gameState.mode !== 'local') socket.emit('game:dash');
 }
 
 function doUlt(player, target) {
@@ -973,7 +996,7 @@ function doUlt(player, target) {
   // Screen shake
   triggerShake(CFG.screenShakeUlt);
   spawnExplosion(player.x, player.y, player.color, 28);
-  if(player.isLocal) socket.emit('game:shoot', { dx:0, dy:0, isUlt:true }); // 서버에 궁극기 발사 알림 (간소화)
+  if(player.isLocal && gameState.mode !== 'local') socket.emit('game:shoot', { dx:0, dy:0, isUlt:true });
 }
 
 function spawnBullet(shooter, dx, dy, isUlt) {
@@ -1054,20 +1077,33 @@ function movePlayer(p, dt) {
   const W = canvas.width, H = canvas.height;
   const hudH = 56, ctrlH = 180;
   let nx=0, ny=0;
+  let input = {};
 
-  const input = p.isLocal ? {
-    up:    keys['KeyW'] || keys['ArrowUp'] || touchDirs.up,
-    down:  keys['KeyS'] || keys['ArrowDown'] || touchDirs.down,
-    left:  keys['KeyA'] || keys['ArrowLeft'] || touchDirs.left,
-    right: keys['KeyD'] || keys['ArrowRight'] || touchDirs.right
-  } : remoteInput;
+  if (gameState.mode === 'local') {
+    if (p === gameState.p1) {
+      input = {
+        up: keys['KeyW'], down: keys['KeyS'], left: keys['KeyA'], right: keys['KeyD']
+      };
+    } else {
+      input = {
+        up: keys['ArrowUp'], down: keys['ArrowDown'], left: keys['ArrowLeft'], right: keys['ArrowRight']
+      };
+    }
+  } else {
+    input = p.isLocal ? {
+      up:    keys['KeyW'] || keys['ArrowUp'] || touchDirs.up,
+      down:  keys['KeyS'] || keys['ArrowDown'] || touchDirs.down,
+      left:  keys['KeyA'] || keys['ArrowLeft'] || touchDirs.left,
+      right: keys['KeyD'] || keys['ArrowRight'] || touchDirs.right
+    } : remoteInput;
+  }
 
   if(input.up) ny=-1;
   if(input.down) ny=1;
   if(input.left) nx=-1;
   if(input.right) nx=1;
 
-  if(p.isLocal) socket.emit('game:input', input);
+  if(p.isLocal && gameState.mode !== 'local') socket.emit('game:input', input);
 
   if(nx||ny) {
     const len = Math.hypot(nx,ny);
@@ -1082,10 +1118,10 @@ function movePlayer(p, dt) {
 
   const spd = CFG.playerSpeed * (p.dashActive ? CFG.dashMult : 1);
   
-  if (p.isLocal) {
+  if (p.isLocal || gameState.mode === 'local') {
     p.x = clamp(p.x + nx*spd*dt, CFG.playerSize, W-CFG.playerSize);
     p.y = clamp(p.y + ny*spd*dt, hudH+CFG.playerSize, H-ctrlH-CFG.playerSize);
-  } else if (p.targetX !== undefined) {
+  } else if (!p.isLocal && p.targetX !== undefined) {
     // 상대방 캐릭터는 서버에서 받은 목표 위치로 부드럽게 따라감
     p.x = lerp(p.x, p.targetX, 0.2);
     p.y = lerp(p.y, p.targetY, 0.2);
@@ -1128,11 +1164,16 @@ function updateBullets(dt) {
         hit = dist(b,p) < CFG.playerSize+b.r;
       }
       if(hit) {
-        // 직접 HP를 깎지 않고 서버에 알림 -> 피해자 화면에서 HP 깎임 -> 다시 동기화됨
-        if (b.ownerId === myId) {
-          socket.emit('game:hit', { targetId: p.id, dmg });
+        if (gameState.mode === 'local') {
+          p.hp = Math.max(0, p.hp - dmg);
+          if (p.hp <= 0) endGame(p === gameState.p1 ? 'p2' : 'p1');
+        } else {
+          // 온라인 모드: 피해자 화면에서 HP 깎이도록 서버에 알림
+          if (b.ownerId === myId) {
+            socket.emit('game:hit', { targetId: p.id, dmg });
+          }
         }
-        
+
         // Ult gauge for shooter
         const shooter = players.find(pl=>pl.id===b.ownerId);
         if(shooter) shooter.ultGauge = Math.min(100, shooter.ultGauge+CFG.ultGaugePerHit);
@@ -1342,7 +1383,11 @@ function updateHUD() {
 // ─── GAME OVER ───────────────────────────────────────────
 function endGame(winner) {
   gameState.running = false;
-  socket.emit('game:over', { winnerId: (winner === 'p1' ? gameState.p1.id : gameState.p2.id) });
+  
+  if (gameState.mode !== 'local') {
+    const winnerId = winner === 'p1' ? gameState.p1.id : gameState.p2.id;
+    socket.emit('game:over', { winnerId });
+  }
 
   const overlay = document.getElementById('resultOverlay');
   const title   = document.getElementById('resultTitle');
@@ -1367,7 +1412,7 @@ function endGame(winner) {
 
 document.getElementById('resultRematch').onclick = () => {
   const old = gameState;
-  startGame(old.mode);
+  startGame(old.mode, old.mode === 'local' ? 'left' : (myId === old.p1.id ? 'left' : 'right'), old.p1, old.p2);
 };
 
 function goLobby() {
@@ -1377,6 +1422,10 @@ function goLobby() {
   socket.emit('room:leave');
   showScreen('lobbyScreen');
 }
+
+document.getElementById('localModeBtn').onclick = () => {
+  startGame('local');
+};
 
 // ─── INIT SHAPE PREVIEWS ─────────────────────────────────
 // (called after DOM ready)
@@ -1388,7 +1437,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Debug shortcut: press G to start game immediately (for testing)
 window.addEventListener('keydown', e => {
   if(e.code==='KeyG' && !gameState && document.getElementById('lobbyScreen').classList.contains('active')) {
-    startGame('pvp');
+    startGame('local');
   }
 });
 
