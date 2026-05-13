@@ -519,6 +519,8 @@
   </div>
 </div>
 
+<script src="/socket.io/socket.io.js"></script>
+
 <script>
 /* ══════════════════════════════════════════════════════════
    NEON CLASH — Full Game Engine
@@ -578,31 +580,27 @@ const touchDirs = { up:false, down:false, left:false, right:false };
 let shakeTime = 0;
 let shakeMag  = 0;
 
-// ─── SOCKET (MOCK STUB) ───────────────────────────────────
-const socket = {
-  _handlers: {},
-  on(ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); },
-  emit(ev, data) {
-    console.log('[Socket EMIT]', ev, data);
-    // Simulate server echo for demo
-    setTimeout(() => this._trigger(ev + '_ack', data), 60);
-  },
-  _trigger(ev, data) {
-    (this._handlers[ev] || []).forEach(fn => fn(data));
-  },
-  // ── mock lobby updates ──
-  mockInit() {
-    // Fake players
-    const fakeNames = ['ZERO_X','PHANTOM','BLADE_7','NOVA','CRUX'];
-    fakeNames.forEach((n,i) => {
-      lobbyPlayers.push({ id:'bot'+i, name:n, color:COLORS[(i+1)%COLORS.length], shape:i%2?'circle':'rect', status:'idle' });
-    });
-    // Fake rooms
-    lobbyRooms.push({ id:'r1', name:'ARENA-01', host:'ZERO_X', count:1, max:2 });
-    lobbyRooms.push({ id:'r2', name:'DEATH MATCH', host:'NOVA', count:2, max:2 });
-    renderLobby();
+// ─── SOCKET CONNECTION ───────────────────────────────────
+const socket = io();
+
+socket.on('lobby:update', ({ playerList, roomList }) => {
+  lobbyPlayers = playerList;
+  lobbyRooms = roomList;
+  renderLobby();
+});
+
+socket.on('login:ack', ({ ok, player }) => {
+  if (ok) {
+    myId = player.id;
+    showScreen('lobbyScreen');
+    buildLobbyUI();
   }
-};
+});
+
+socket.on('room:joined', ({ roomId, room }) => {
+  notify(`JOINED ${room.name}`);
+  startGame('pvp');
+});
 
 // ─── UTILS ───────────────────────────────────────────────
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
@@ -631,12 +629,8 @@ function doLogin() {
   const val = document.getElementById('loginInput').value.trim();
   if(!val) { notify('ENTER A CALLSIGN'); return; }
   myName = val.toUpperCase().slice(0,16);
-  myId   = uuid();
   document.getElementById('myName').textContent = myName;
   socket.emit('login', { id:myId, name:myName, color:myColor, shape:myShape });
-  buildLobbyUI();
-  socket.mockInit();
-  showScreen('lobbyScreen');
 }
 
 function logout() {
@@ -717,18 +711,14 @@ function updatePreview() {
 function renderLobby() {
   // Players
   const pl = document.getElementById('playerList');
-  const allPlayers = [
-    { id:myId, name:myName, color:myColor, shape:myShape, status:'idle (you)' },
-    ...lobbyPlayers
-  ];
-  pl.innerHTML = allPlayers.map(p => `
+  pl.innerHTML = lobbyPlayers.map(p => `
     <div class="player-item">
       <div class="player-color-dot" style="background:${p.color};box-shadow:0 0 6px ${p.color}"></div>
       <div class="player-name">${p.name}</div>
       <div class="player-status">${p.status||'idle'}</div>
     </div>
   `).join('');
-  document.getElementById('onlineCount').textContent = allPlayers.length + ' players online';
+  document.getElementById('onlineCount').textContent = lobbyPlayers.length + ' players online';
 
   // Rooms
   const rl = document.getElementById('roomList');
@@ -746,13 +736,12 @@ function renderLobby() {
 }
 
 document.getElementById('createRoomBtn').onclick = () => {
-  notify('Creating room...');
-  setTimeout(() => startGame('pvp'), 600);
+  const roomName = prompt("ROOM NAME:", `${myName}'s ROOM`);
+  if (roomName) socket.emit('room:create', { roomName });
 };
 
 function joinRoom(id) {
-  notify('Joining room...');
-  setTimeout(() => startGame('pvp'), 600);
+  socket.emit('room:join', { roomId: id });
 }
 
 // ─── GAME ENGINE ─────────────────────────────────────────

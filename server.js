@@ -36,6 +36,11 @@ const players = new Map();
 const rooms   = new Map();
 
 /**
+ * @type {Map<string, string>} invitedSocketId -> inviterSocketId
+ * 보류 중인 1v1 초대 목록을 저장합니다.
+ */
+const pendingInvites = new Map();
+/**
  * @typedef {{ id:string, name:string, color:string, shape:string, roomId:string|null }} Player
  * @typedef {{ id:string, name:string, hostId:string, players:string[], state:'waiting'|'playing' }} Room
  */
@@ -91,7 +96,7 @@ io.on('connection', (socket) => {
     players.set(socket.id, player);
 
     socket.emit('login:ack', { ok: true, player });
-    broadcastLobby();
+    broadcastLobby(); // 새로운 플레이어가 로그인했으므로 로비 상태를 모두에게 브로드캐스트
     console.log(`[login] ${player.name}`);
   });
 
@@ -216,12 +221,109 @@ io.on('connection', (socket) => {
     broadcastLobby();
   });
 
+  // 연결이 끊기는 중 (방 정보가 아직 소켓에 남아있을 때)
+  socket.on('disconnecting', () => {
+    // 플레이어가 방을 나가거나 연결이 끊어질 때, 관련 초대 정리
+    leaveRoom(socket);
+  });
+
   // ── 연결 끊김 ────────────────────────────────────────
   socket.on('disconnect', () => {
     console.log(`[disconnect] ${socket.id}`);
-    leaveRoom(socket);
+    clearPlayerInvites(socket.id); // 연결 끊김 시 초대 정리
     players.delete(socket.id);
     broadcastLobby();
+  });
+
+  // ── 1대1 초대 ────────────────────────────────────────
+  socket.on('player:invite', ({ targetId }) => {
+    const inviter = players.get(socket.id);
+    const invited = players.get(targetId);
+
+    if (!inviter || !invited) {
+      socket.emit('player:invite:error', { msg: 'Player not found.' });
+      return;
+    }
+    if (inviter.id === invited.id) {
+      socket.emit('player:invite:error', { msg: 'Cannot invite yourself.' });
+      return;
+    }
+    if (inviter.roomId || invited.roomId) {
+      socket.emit('player:invite:error', { msg: 'One or both players are already in a room.' });
+      return;
+    }
+    if (pendingInvites.has(invited.id)) {
+      socket.emit('player:invite:error', { msg: `${invited.name} already has a pending invitation.` });
+      return;
+    }
+
+    pendingInvites.set(invited.id, inviter.id);
+    io.to(invited.id).emit('player:invite:request', { inviterId: inviter.id, inviterName: inviter.name });
+    socket.emit('player:invite:ack', { invitedName: invited.name });
+    console.log(`[player:invite] ${inviter.name} invited ${invited.name}`);
+  });
+
+  // ── 1대1 초대 수락 ───────────────────────────────────
+  socket.on('player:invite:accept', () => {
+    const invitedId = socket.id;
+    const inviterId = pendingInvites.get(invitedId);
+
+    if (!inviterId) {
+      socket.emit('player:invite:error', { msg: 'No pending invitation.' });
+      return;
+    }
+
+    const inviter = players.get(inviterId);
+    const invited = players.get(invitedId);
+
+    if (!inviter || !invited || inviter.roomId || invited.roomId) {
+      socket.emit('player:invite:error', { msg: 'Invitation invalid or players busy.' });
+      pendingInvites.delete(invitedId); // 유효하지 않은 초대 정리
+      return;
+    }
+
+    // 방 생성
+    const roomId = uuid();
+    const room = {
+      id:      roomId,
+      name:    `${inviter.name} vs ${invited.name}`,
+      hostId:  inviter.id,
+      players: [inviter.id, invited.id],
+      state:   'waiting',
+    };
+    rooms.set(roomId, room);
+
+    inviter.roomId = roomId;
+    invited.roomId = roomId;
+
+    io.to(inviter.id).socketsJoin(roomId);
+    io.to(invited.id).socketsJoin(roomId);
+
+    io.to(inviter.id).emit('room:joined', { roomId, room: sanitizeRoom(room) });
+    io.to(invited.id).emit('room:joined', { roomId, room: sanitizeRoom(room) });
+
+    pendingInvites.delete(invitedId);
+    startRoom(room);
+    broadcastLobby();
+    console.log(`[player:invite:accept] ${invited.name} accepted invite from ${inviter.name}. Room ${room.name} created.`);
+  });
+
+  // ── 1대1 초대 거절 ───────────────────────────────────
+  socket.on('player:invite:decline', () => {
+    const invitedId = socket.id;
+    const inviterId = pendingInvites.get(invitedId);
+
+    if (!inviterId) {
+      socket.emit('player:invite:error', { msg: 'No pending invitation to decline.' });
+      return;
+    }
+
+    const inviter = players.get(inviterId);
+    if (inviter) {
+      io.to(inviter.id).emit('player:invite:declined', { invitedName: players.get(invitedId)?.name || 'Unknown Player' });
+    }
+    pendingInvites.delete(invitedId);
+    console.log(`[player:invite:decline] ${players.get(invitedId)?.name} declined invite from ${inviter?.name}`);
   });
 });
 
@@ -252,6 +354,25 @@ function startRoom(room) {
   console.log(`[game:start] ${room.name} — ${p1.name} vs ${p2.name}`);
 }
 
+/**
+ * 특정 플레이어와 관련된 모든 보류 중인 초대를 지웁니다.
+ * @param {string} socketId - 플레이어의 소켓 ID
+ */
+function clearPlayerInvites(socketId) {
+  // 이 플레이어가 누군가를 초대한 경우
+  for (const [invitedId, inviterId] of pendingInvites.entries()) {
+    if (inviterId === socketId) {
+      pendingInvites.delete(invitedId);
+      io.to(invitedId).emit('player:invite:cancelled', { msg: 'Inviter disconnected.' });
+    }
+  }
+  // 이 플레이어가 누군가에게 초대받은 경우
+  if (pendingInvites.has(socketId)) {
+    const inviterId = pendingInvites.get(socketId);
+    pendingInvites.delete(socketId);
+    io.to(inviterId).emit('player:invite:declined', { invitedName: players.get(socketId)?.name || 'Unknown Player', msg: 'Invited player disconnected.' });
+  }
+}
 /** 소켓이 현재 방에서 퇴장 */
 function leaveRoom(socket) {
   const p = players.get(socket.id);
@@ -276,6 +397,7 @@ function leaveRoom(socket) {
 
   socket.leave(p.roomId);
   p.roomId = null;
+  clearPlayerInvites(socket.id); // 방을 나갈 때도 초대 정리
   broadcastLobby();
 }
 
